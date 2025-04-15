@@ -13,6 +13,7 @@ class FileInfo(BaseModel):
 
 class FilePreviewResult(BaseModel):
     """Result of file preview operation."""
+    fileId: str = Field(..., description="Unique identifier for the uploaded file")
     headers: List[str] = Field(..., description="Column headers")
     previewRows: List[Dict[str, Any]] = Field(..., description="Preview rows")
     fileInfo: Optional[FileInfo] = Field(None, description="Additional file metadata")

@@ -1,0 +1,37 @@
+.layerSelector { /* Wrapper */ }
+
+.title {
+    margin-top: 0;
+    margin-bottom: 8px;
+    font-size: 1em;
+    color: #555;
+}
+
+.optionsList {
+    max-height: 150px; /* Limit height and make scrollable */
+    overflow-y: auto;
+    border: 1px solid #eee;
+    padding: 8px;
+    border-radius: 3px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.optionLabel {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    font-size: 0.95em;
+}
+
+.checkboxInput {
+    margin-right: 8px;
+    cursor: pointer;
+}
+
+.noLayers {
+    font-size: 0.9em;
+    color: #888;
+    font-style: italic;
+} 

@@ -8,11 +8,16 @@ from contextlib import asynccontextmanager
 from app.services.file_service import FileService
 from app.models.file_data import FilePreviewResult, ErrorResponse
 
-# Create router
-router = APIRouter(prefix="/api/file", tags=["file"])
+# Temporary directory for file uploads (could be configured)
+TEMP_DIR = Path("temp") 
+TEMP_DIR.mkdir(exist_ok=True) # Ensure directory exists
 
-# Global temporary directory that persists during application lifetime
-TEMP_DIR = Path(tempfile.mkdtemp(prefix="gliagrid_"))
+# Create API router
+router = APIRouter(
+    prefix="/file",
+    tags=["File Handling"],
+    responses={404: {"description": "Not found"}}
+)
 
 # Register cleanup on application shutdown
 @asynccontextmanager
@@ -32,22 +37,20 @@ def get_temp_dir() -> Path:
     """
     return TEMP_DIR
 
-
-@router.post("/preview", response_model=FilePreviewResult, responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}})
-async def preview_file(
-    file: UploadFile = File(...),
-    temp_dir: Path = Depends(get_temp_dir)
-):
-    """Preview file contents (headers and sample rows)
-    
-    Args:
-        file: The uploaded file
-        temp_dir: Directory to store temporary files
-        
-    Returns:
-        FilePreviewResult: Preview data including headers and rows
-        
-    Raises:
-        HTTPException: If file processing fails
+@router.post("/preview", response_model=FilePreviewResult)
+async def upload_and_preview_file(file: UploadFile = File(...)):
     """
-    return await FileService.process_file(file, temp_dir) 
+    Uploads a file, saves it temporarily, generates a preview, 
+    and returns the preview data along with a unique file ID.
+    
+    Handles both CSV and H5AD files.
+    """
+    try:
+        # Use the refactored service method
+        return await FileService.save_and_preview_file(file)
+    except HTTPException as e:
+        # Re-raise known HTTP exceptions
+        raise e
+    except Exception as e:
+        # Catch unexpected errors during processing
+        raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}") 

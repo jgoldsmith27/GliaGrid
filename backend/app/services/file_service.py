@@ -2,6 +2,7 @@
 import os
 import tempfile
 import shutil
+import uuid
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Union, Tuple
 import pandas as pd
@@ -20,6 +21,8 @@ class FileService:
     1. Process various file formats (CSV, H5AD)
     2. Extract preview data for UI display
     3. Convert files to pandas DataFrames for uniform handling
+    4. Store uploaded files temporarily with a unique ID
+    5. Retrieve file paths based on their ID
     """
     
     # Supported file extensions
@@ -28,20 +31,30 @@ class FileService:
         '.h5ad': 'process_h5ad',
     }
     
+    # Directory for storing uploaded files (relative to backend root)
+    TEMP_STORAGE_DIR = Path("temp/uploads") 
+    
     @classmethod
-    async def process_file(cls, file: UploadFile, temp_dir: Path) -> FilePreviewResult:
-        """Process uploaded file based on its extension.
+    def initialize_storage(cls):
+        """Create the temporary storage directory if it doesn't exist."""
+        cls.TEMP_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+
+    @classmethod
+    async def save_and_preview_file(cls, file: UploadFile) -> FilePreviewResult:
+        """Saves the uploaded file to temporary storage, generates a preview, 
+        and returns the preview data along with a unique file ID.
         
         Args:
             file: The uploaded file
-            temp_dir: Directory to store temporary files
             
         Returns:
-            FilePreviewResult: Preview data with headers and sample rows
+            FilePreviewResult: Preview data including headers, sample rows, and fileId.
             
         Raises:
-            HTTPException: If file processing fails
+            HTTPException: If file processing fails or format is unsupported.
         """
+        cls.initialize_storage() # Ensure storage directory exists
+
         if not file.filename:
             raise HTTPException(status_code=400, detail="No filename provided")
             
@@ -53,61 +66,120 @@ class FileService:
                 detail=f"Unsupported file format: {file_ext}. Supported formats: {', '.join(cls.SUPPORTED_FORMATS.keys())}"
             )
         
+        # Generate a unique filename to avoid collisions
+        file_id = str(uuid.uuid4())
+        unique_filename = f"{file_id}{file_ext}"
+        file_path = cls.TEMP_STORAGE_DIR / unique_filename
+
         try:
-            # Use a named temporary file that gets automatically deleted when closed
-            with tempfile.NamedTemporaryFile(suffix=file_ext, dir=temp_dir, delete=False) as tmp_file:
-                # Save uploaded file content
-                shutil.copyfileobj(file.file, tmp_file)
-                tmp_path = Path(tmp_file.name)
+            # Save the uploaded file content to the persistent temp location
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
                 
-            try:
-                # Get the appropriate processing method
-                process_method = getattr(cls, cls.SUPPORTED_FORMATS[file_ext])
-                # Process the file - path is closed but file still exists
-                return process_method(tmp_path)
-            finally:
-                # Ensure temporary file is removed
-                if os.path.exists(tmp_path):
-                    os.unlink(tmp_path)
+            # Process the file to get preview data components
+            process_method = getattr(cls, cls.SUPPORTED_FORMATS[file_ext])
+            
+            headers: List[str]
+            preview_rows: List[Dict[str, Any]]
+            file_info: Optional[FileInfo] = None
+            
+            if file_ext == '.csv':
+                headers, preview_rows = process_method(file_path)
+            elif file_ext == '.h5ad':
+                headers, preview_rows, file_info = process_method(file_path)
+            else:
+                # Should not happen due to earlier check, but handle defensively
+                raise HTTPException(status_code=500, detail="Internal error: Unexpected file type during processing.")
+            
+            # Construct the final result including fileId
+            return FilePreviewResult(
+                fileId=file_id,
+                headers=headers,
+                previewRows=preview_rows,
+                fileInfo=file_info
+            )
+
         except Exception as e:
+            # Clean up the saved file if processing fails
+            if os.path.exists(file_path):
+                os.unlink(file_path)
             raise HTTPException(status_code=500, detail=f"Failed to process {file_ext} file: {str(e)}")
         finally:
-            file.file.close()
-    
+            if file.file and not file.file.closed:
+                 file.file.close()
+
+    @classmethod
+    def get_file_path(cls, file_id: str) -> Path:
+        """Retrieves the full path of a stored file based on its ID.
+        
+        Args:
+            file_id: The unique identifier of the file.
+            
+        Returns:
+            Path: The full path to the stored file.
+            
+        Raises:
+            HTTPException: If the file corresponding to the ID is not found or has an unexpected extension.
+        """
+        # Search for the file with the given ID in the temp directory
+        potential_files = list(cls.TEMP_STORAGE_DIR.glob(f"{file_id}.*"))
+        
+        if not potential_files:
+            raise HTTPException(status_code=404, detail=f"File with ID {file_id} not found.")
+            
+        if len(potential_files) > 1:
+             # This shouldn't happen with UUIDs, but handle defensively
+             raise HTTPException(status_code=500, detail=f"Multiple files found for ID {file_id}. Storage inconsistency.")
+             
+        file_path = potential_files[0]
+        
+        # Optional: Verify the extension matches supported formats if needed
+        # file_ext = file_path.suffix.lower()
+        # if file_ext not in cls.SUPPORTED_FORMATS:
+        #     raise HTTPException(status_code=400, detail=f"File {file_id} has an unsupported extension: {file_ext}")
+            
+        return file_path
+
     @staticmethod
-    def process_csv(file_path: Path) -> FilePreviewResult:
+    def process_csv(file_path: Path) -> Tuple[List[str], List[Dict[str, Any]]]:
         """Process CSV file and return headers and preview rows.
         
         Args:
             file_path: Path to the CSV file
             
         Returns:
-            FilePreviewResult: Preview data with headers and sample rows
+            Tuple[List[str], List[Dict[str, Any]]]: Headers and preview rows
             
         Raises:
             Exception: If CSV processing fails
         """
-        # Read CSV file
-        df = pd.read_csv(file_path)
-        
+        # Read only the first 6 rows (header + 5 data rows) for preview efficiency
+        try:
+            df = pd.read_csv(file_path, nrows=6)
+        except pd.errors.EmptyDataError:
+            # Handle case where file has fewer than 6 rows or is empty
+            df = pd.read_csv(file_path) # Read whatever is there
+        except Exception as e:
+             raise HTTPException(status_code=400, detail=f"Error reading CSV headers/preview: {str(e)}")
+
         # Get headers and preview rows
         headers = df.columns.tolist()
         preview_rows = df.head(5).to_dict('records')
         
-        return FilePreviewResult(
-            headers=headers,
-            previewRows=preview_rows
-        )
+        return headers, preview_rows
     
     @staticmethod
-    def process_h5ad(file_path: Path) -> FilePreviewResult:
-        """Process H5AD file and return headers and preview rows.
+    def process_h5ad(file_path: Path) -> Tuple[List[str], List[Dict[str, Any]], Optional[FileInfo]]:
+        """Process H5AD file and return headers, preview rows, and file info.
         
         Args:
             file_path: Path to the H5AD file
             
         Returns:
-            FilePreviewResult: Preview data with headers, sample rows, and file metadata
+            Tuple containing:
+            - List of headers
+            - List of preview rows
+            - Optional FileInfo metadata
             
         Raises:
             Exception: If H5AD processing fails
@@ -121,11 +193,7 @@ class FileService:
         if not headers:
             raise Exception("No usable data found in H5AD file")
         
-        return FilePreviewResult(
-            headers=headers,
-            previewRows=preview_rows,
-            fileInfo=file_info
-        )
+        return headers, preview_rows, file_info
     
     @staticmethod
     def _extract_h5ad_preview(adata: ad.AnnData) -> Tuple[List[str], List[Dict[str, Any]], FileInfo]:

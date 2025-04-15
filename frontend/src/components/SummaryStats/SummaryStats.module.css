@@ -1,0 +1,30 @@
+.summaryStatsContainer {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    background-color: #f8f8f8;
+    border-radius: 4px;
+    border: 1px solid #eee;
+}
+
+.statItem {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.95em;
+}
+
+.statLabel {
+    color: #555;
+    margin-right: 10px;
+}
+
+.statValue {
+    font-weight: bold;
+    color: #333;
+}
+
+.noData {
+    color: #888;
+    font-style: italic;
+} 

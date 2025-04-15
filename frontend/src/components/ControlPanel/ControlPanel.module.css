@@ -1,0 +1,23 @@
+.controlPanel {
+    /* Add styles specific to the control panel wrapper if needed */
+}
+
+.title {
+    margin-top: 0;
+    margin-bottom: 15px;
+    font-size: 1.2em;
+    color: #444;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 5px;
+}
+
+.subTitle {
+    margin-top: 10px;
+    margin-bottom: 8px;
+    font-size: 1em;
+    color: #555;
+}
+
+.controlGroup {
+    margin-bottom: 20px; /* Space between control sections */
+} 

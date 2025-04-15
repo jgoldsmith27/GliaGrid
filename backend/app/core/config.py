@@ -22,9 +22,10 @@ class Settings(BaseSettings):
     RELOAD: bool = True
     
     # CORS settings
+    # ALLOW_ORIGINS: list[str] = ["*"] # Temporarily allow all origins for WebSocket diagnosis
     ALLOW_ORIGINS: list[str] = [
         "http://localhost:5173",  # Default Vite dev server
-        "http://localhost:8000",  # Backend API
+        "http://localhost:8000",  # Backend API (If backend needs to call itself)
         "file://"                 # Electron local files
     ]
     

@@ -1,0 +1,26 @@
+.scopeSelector { /* Wrapper */ }
+
+.title {
+    margin-top: 0;
+    margin-bottom: 8px;
+    font-size: 1em;
+    color: #555;
+}
+
+.options {
+    display: flex;
+    flex-direction: column; /* Stack options vertically */
+    gap: 5px;
+}
+
+.optionLabel {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    font-size: 0.95em;
+}
+
+.radioInput {
+    margin-right: 8px;
+    cursor: pointer;
+} 

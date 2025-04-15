@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import styles from './DataInputPage.module.css';
 import FileUploader from '../../components/FileUploader/FileUploader';
 import ColumnMapper from '../../components/ColumnMapper/ColumnMapper';
 import DataPreview from '../../components/DataPreview/DataPreview';
-import { FileState, FileType, FilePreviewResult, requiredColumns, mappingFields } from '../../types/dataTypes';
+import { FileState, FileType, FilePreviewResult, requiredColumns, mappingFields, AnalysisPayload } from '../../types/dataTypes';
 
 // Augment the window interface to tell TypeScript about electronAPI
 declare global {
@@ -15,29 +16,26 @@ declare global {
 }
 
 const DataInputPage: React.FC = () => {
-  const [spatialFile, setSpatialFile] = useState<FileState>({ 
-    file: null, 
-    headers: [], 
-    previewRows: [], 
-    error: null, 
-    isLoading: false 
+  const navigate = useNavigate();
+
+  // Helper to create initial file state
+  const createInitialFileState = (): FileState => ({
+    file: null,
+    fileId: null, // Added fileId
+    headers: [],
+    previewRows: [],
+    error: null,
+    isLoading: false,
+    geneCol: undefined, xCol: undefined, yCol: undefined, layerCol: undefined,
+    ligandCol: undefined, receptorCol: undefined, moduleCol: undefined
   });
   
-  const [interactionsFile, setInteractionsFile] = useState<FileState>({ 
-    file: null, 
-    headers: [], 
-    previewRows: [], 
-    error: null, 
-    isLoading: false 
-  });
-  
-  const [modulesFile, setModulesFile] = useState<FileState>({ 
-    file: null, 
-    headers: [], 
-    previewRows: [], 
-    error: null, 
-    isLoading: false 
-  });
+  const [spatialFile, setSpatialFile] = useState<FileState>(createInitialFileState());
+  const [interactionsFile, setInteractionsFile] = useState<FileState>(createInitialFileState());
+  const [modulesFile, setModulesFile] = useState<FileState>(createInitialFileState());
+  const [analysisStatus, setAnalysisStatus] = useState<string>(''); // To display analysis status/errors
+  const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false); // Loading state for analysis
+  const [lastJobId, setLastJobId] = useState<string | null>(null); // Store the ID of the last started job
 
   const updateFileState = (
     setter: React.Dispatch<React.SetStateAction<FileState>>,
@@ -51,7 +49,7 @@ const DataInputPage: React.FC = () => {
                    type === 'interactions' ? setInteractionsFile :
                    setModulesFile;
 
-    updateFileState(setter, { file: null, headers: [], previewRows: [], error: null, isLoading: false }); // Reset on new selection
+    updateFileState(setter, createInitialFileState()); // Reset completely on new selection
 
     if (event.target.files && event.target.files[0]) {
       const file = event.target.files[0];
@@ -82,13 +80,14 @@ const DataInputPage: React.FC = () => {
           throw new Error(`Server error: ${response.status} - ${errorText}`);
         }
 
-        const result = await response.json();
+        const result: FilePreviewResult = await response.json(); // Ensure type
         console.log(`[React] Preview result received for ${type}:`, result);
 
         if (result.error) {
           updateFileState(setter, { error: result.error, isLoading: false });
-        } else if (result.headers && result.previewRows) {
+        } else if (result.headers && result.previewRows && result.fileId) { // Check for fileId
           updateFileState(setter, {
+            fileId: result.fileId, // Store fileId
             headers: result.headers,
             previewRows: result.previewRows,
             fileInfo: result.fileInfo, // Store file info if available (for H5AD)
@@ -152,34 +151,26 @@ const DataInputPage: React.FC = () => {
   const handleMappingChange = (
     event: React.ChangeEvent<HTMLSelectElement>,
     type: FileType,
-    columnKey: keyof FileState
+    columnKey: keyof FileState // Revert to expecting keyof FileState
   ) => {
     const setter = type === 'spatial' ? setSpatialFile :
                    type === 'interactions' ? setInteractionsFile :
                    setModulesFile;
     const selectedValue = event.target.value;
-    updateFileState(setter, { [columnKey]: selectedValue });
+    updateFileState(setter, { [columnKey]: selectedValue }); // This is type-safe now
   };
 
   const handleRemoveFile = (type: FileType) => {
     const setter = type === 'spatial' ? setSpatialFile :
                    type === 'interactions' ? setInteractionsFile :
                    setModulesFile;
-    // Reset the state for this file type
-    updateFileState(setter, {
-        file: null,
-        headers: [],
-        previewRows: [],
-        error: null,
-        isLoading: false,
-        geneCol: undefined, xCol: undefined, yCol: undefined, layerCol: undefined,
-        ligandCol: undefined, receptorCol: undefined, moduleCol: undefined
-    });
+    // Reset the state for this file type using the helper
+    updateFileState(setter, createInitialFileState());
   };
 
   // Check if all required columns for a file type are mapped
   const checkRequiredMapping = (state: FileState, type: FileType): boolean => {
-    if (!state.file) return false; // No file loaded
+    if (!state.file || !state.fileId) return false; // Ensure file is loaded AND has an ID
     const reqCols = requiredColumns[type] || [];
     return reqCols.every(key => !!state[key as keyof FileState]);
   };
@@ -192,37 +183,120 @@ const DataInputPage: React.FC = () => {
   const getColumnMapperProps = (fileState: FileState, type: FileType) => {
     if (!fileState.file) return null;
     
-    // Create mapping fields in the format required by ColumnMapper
-    const fields = mappingFields[type].map(({ key, label }) => {
+    // Keep track of the actual keys alongside the IDs for the callback
+    const fieldsWithKeys = mappingFields[type].map(({ key, label }) => {
       return {
-        id: key,
+        id: key, // The ID used for the component key/mapping
+        key: key, // The actual keyof FileState
         label,
-        required: requiredColumns[type].includes(key as string)
+        required: requiredColumns[type].includes(key)
       };
     });
-    
-    // Get current mappings
+
+    // Get current mappings using the key
     const currentMappings: Record<string, string> = {};
-    mappingFields[type].forEach(({ key }) => {
-      const value = fileState[key as keyof FileState];
-      if (value) currentMappings[key] = value as string;
+    // Iterate only over the actual mapping keys defined for the current file type
+    mappingFields[type].forEach(({ key }) => { 
+      // Check if the key corresponds to a mapping property (like 'geneCol', 'xCol', etc.)
+      if (key in fileState) {
+        const value = fileState[key]; // Access state directly with the key
+        // Ensure the value is a string before assigning (it should be for mapping keys)
+        if (typeof value === 'string') { 
+            currentMappings[key] = value; // Map using the key as ID
+        }
+      }
     });
     
     return {
       headers: fileState.headers,
       isLoading: fileState.isLoading,
       error: fileState.error,
-      requiredFields: fields,
+      // Pass only id, label, required to ColumnMapper props if it expects that shape
+      requiredFields: fieldsWithKeys.map(({ id, label, required }) => ({ id, label, required })), 
       mappings: currentMappings,
       onMappingChange: (fieldId: string, selectedColumn: string) => {
-        handleMappingChange(
-          { target: { value: selectedColumn } } as React.ChangeEvent<HTMLSelectElement>,
-          type,
-          fieldId as keyof FileState
-        );
+        // Find the corresponding field object to get the correct keyof FileState
+        const field = fieldsWithKeys.find(f => f.id === fieldId);
+        if (field) {
+          handleMappingChange(
+            { target: { value: selectedColumn } } as React.ChangeEvent<HTMLSelectElement>,
+            type,
+            field.key // Pass the actual keyof FileState
+          );
+        } else {
+           console.error(`Could not find field definition for ID: ${fieldId}`);
+        }
       }
     };
   };
+
+  // --- Start Analysis Handler ---
+  const handleStartAnalysis = async () => {
+    if (!canProcess) {
+      setAnalysisStatus('Please ensure all files are uploaded and required columns are mapped.');
+      return;
+    }
+
+    setIsAnalyzing(true);
+    setAnalysisStatus('Starting analysis...');
+    setLastJobId(null); // Reset last job ID
+
+    // Construct the payload
+    const payload: AnalysisPayload = {
+      spatialFileId: spatialFile.fileId!,
+      spatialMapping: {
+        geneCol: spatialFile.geneCol!,
+        xCol: spatialFile.xCol!,
+        yCol: spatialFile.yCol!,
+        layerCol: spatialFile.layerCol!
+      },
+      interactionsFileId: interactionsFile.fileId!,
+      interactionsMapping: {
+        ligandCol: interactionsFile.ligandCol!,
+        receptorCol: interactionsFile.receptorCol!
+      },
+      modulesFileId: modulesFile.fileId!,
+      modulesMapping: {
+        geneCol: modulesFile.geneCol!,
+        moduleCol: modulesFile.moduleCol!
+      }
+    };
+
+    console.log("[React] Sending analysis payload:", payload);
+
+    try {
+      const response = await fetch('http://localhost:8000/api/analysis/start', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.detail || `Server error: ${response.status}`);
+      }
+
+      console.log("[React] Analysis response received:", result);
+      setAnalysisStatus(`Analysis job started successfully! Job ID: ${result.job_id}`);
+      setLastJobId(result.job_id);
+      
+      // Navigate to the status page with the job ID
+      if (result.job_id) {
+        navigate(`/analysis/${result.job_id}`); 
+      }
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("[React] Error starting analysis:", errorMessage);
+      setAnalysisStatus(`Error starting analysis: ${errorMessage}`);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+  // --- End Analysis Handler ---
 
   return (
     <div className={styles.container}>
@@ -248,7 +322,7 @@ const DataInputPage: React.FC = () => {
             
             {/* Data Preview */}
             <DataPreview 
-              headers={spatialFile.headers} 
+              headers={spatialFile.headers}
               rows={spatialFile.previewRows}
               isLoading={spatialFile.isLoading}
               error={spatialFile.error}
@@ -278,7 +352,7 @@ const DataInputPage: React.FC = () => {
             
             {/* Data Preview */}
             <DataPreview 
-              headers={interactionsFile.headers} 
+              headers={interactionsFile.headers}
               rows={interactionsFile.previewRows}
               isLoading={interactionsFile.isLoading}
               error={interactionsFile.error}
@@ -308,7 +382,7 @@ const DataInputPage: React.FC = () => {
             
             {/* Data Preview */}
             <DataPreview 
-              headers={modulesFile.headers} 
+              headers={modulesFile.headers}
               rows={modulesFile.previewRows}
               isLoading={modulesFile.isLoading}
               error={modulesFile.error}
@@ -318,15 +392,35 @@ const DataInputPage: React.FC = () => {
         )}
       </section>
 
-      {/* Process Button */}
-      <button
-         className={styles.processButton}
-         disabled={!canProcess}
-         onClick={() => console.log('Process files:', { spatialFile, interactionsFile, modulesFile })} // Placeholder action
-         title={canProcess ? "Proceed to analysis" : "Please select files and map required columns"}
-      >
-        Start Analysis
-      </button>
+      {/* Analysis Trigger Section */}
+      <section className={`${styles.section} ${styles.analysisSection}`}>
+        <h2 className={styles.sectionTitle}>4. Run Analysis</h2>
+        <button 
+          className={styles.startButton} 
+          onClick={handleStartAnalysis} 
+          disabled={!canProcess || isAnalyzing} // Disable if not ready or already analyzing
+        >
+          {isAnalyzing ? 'Processing...' : 'Start Analysis'}
+        </button>
+        {analysisStatus && (
+          <p 
+            className={styles.statusMessage} 
+            style={{ color: analysisStatus.includes('failed') ? 'red' : analysisStatus.includes('successfully') ? 'green' : 'inherit' }}
+          >
+            {analysisStatus}
+          </p>
+        )}
+        {/* Simple link placeholder - replace with proper routing/navigation later */}
+        {lastJobId && analysisStatus.includes('successfully') && (
+            <p className={styles.statusMessage}> 
+               {/* In a real app, this would be a Link component from react-router-dom */}
+               <a href="#" onClick={(e) => { e.preventDefault(); alert(`Navigate to results for job: ${lastJobId}`)} }>
+                   View Results (Job: {lastJobId})
+               </a>
+            </p>
+        )}
+      </section>
+
     </div>
   );
 };

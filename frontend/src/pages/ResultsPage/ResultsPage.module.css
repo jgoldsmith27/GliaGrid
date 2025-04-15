@@ -1,0 +1,45 @@
+/* ResultsPage Layout */
+.container {
+    padding: 20px;
+    font-family: sans-serif;
+}
+
+.pageTitle {
+    margin-bottom: 20px;
+    color: #333;
+}
+
+.resultsLayout {
+    display: flex;
+    flex-direction: row; /* Default layout: controls on left, display on right */
+    gap: 20px; 
+    /* Adjust layout for smaller screens if needed later */
+    /* @media (max-width: 768px) { flex-direction: column; } */
+}
+
+.controlPanelContainer {
+    flex: 0 0 300px; /* Fixed width for control panel */
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    padding: 15px;
+    background-color: #f9f9f9;
+    height: fit-content; /* Adjust height based on content */
+}
+
+.displayPanelContainer {
+    flex: 1; /* Display panel takes remaining space */
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    padding: 15px;
+    min-height: 400px; /* Ensure it has some height */
+}
+
+/* Basic Loading/Error States */
+.errorMessage {
+    color: red;
+    font-weight: bold;
+}
+
+progress {
+    width: 100%;
+} 

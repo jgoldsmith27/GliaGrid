@@ -1,0 +1,50 @@
+.displayPanel {
+    /* Styles for the display panel wrapper */
+}
+
+.title {
+    margin-top: 0;
+    margin-bottom: 15px;
+    font-size: 1.2em;
+    color: #444;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 5px;
+}
+
+.contextInfo {
+    font-size: 0.9em;
+    color: #666;
+    margin-bottom: 15px;
+    background-color: #f0f0f0;
+    padding: 5px 10px;
+    border-radius: 3px;
+}
+
+.contentArea {
+    /* Styles for the area containing the actual table/viz */
+}
+
+.subTitle {
+     margin-top: 10px;
+    margin-bottom: 8px;
+    font-size: 1.1em;
+    color: #555;
+}
+
+.noData {
+    color: #888;
+    font-style: italic;
+}
+
+.error {
+    color: red;
+}
+
+pre {
+    background-color: #eee;
+    padding: 10px;
+    border-radius: 4px;
+    white-space: pre-wrap; /* Wrap long lines */
+    word-break: break-all; /* Break long words/strings */
+    font-size: 0.85em;
+} 
