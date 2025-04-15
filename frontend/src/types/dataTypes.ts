@@ -14,19 +14,32 @@ export interface FileState {
   ligandCol?: string;
   receptorCol?: string;
   moduleCol?: string;
+  // File info (for H5AD files)
+  fileInfo?: {
+    shape: string;
+    obs_keys: string[];
+    var_keys: string[];
+    obsm_keys: string[];
+  };
 }
 
 export interface FilePreviewResult {
   headers?: string[];
   previewRows?: Record<string, any>[];
   error?: string;
+  fileInfo?: {
+    shape: string;
+    obs_keys: string[];
+    var_keys: string[];
+    obsm_keys: string[];
+  };
 }
 
 export type FileType = 'spatial' | 'interactions' | 'modules';
 
 // Mapping requirements by file type
 export const requiredColumns: Record<FileType, string[]> = {
-  spatial: ['geneCol', 'xCol', 'yCol'], // layerCol is optional
+  spatial: ['geneCol', 'xCol', 'yCol', 'layerCol'],
   interactions: ['ligandCol', 'receptorCol'],
   modules: ['geneCol', 'moduleCol'],
 };
@@ -37,7 +50,7 @@ export const mappingFields: Record<FileType, Array<{key: keyof FileState, label:
     { key: 'geneCol', label: "Map 'Gene ID *' to:" },
     { key: 'xCol', label: "Map 'X Coordinate *' to:" },
     { key: 'yCol', label: "Map 'Y Coordinate *' to:" },
-    { key: 'layerCol', label: "Map 'Layer (Optional)' to:" }
+    { key: 'layerCol', label: "Map 'Layer *' to:" }
   ],
   interactions: [
     { key: 'ligandCol', label: "Map 'Ligand *' to:" },

@@ -64,69 +64,84 @@ const DataInputPage: React.FC = () => {
       }
 
       updateFileState(setter, { file, isLoading: true });
-      console.log(`Reading file content slice for ${type}:`, fileName);
+      console.log(`Processing file for ${type}:`, fileName);
 
-      // --- Read file content SLICE using FileReader --- 
-      const reader = new FileReader();
-      const CHUNK_SIZE = 1024 * 512; // Read first 512KB - should be plenty for headers + few rows
-      const blobSlice = file.slice(0, CHUNK_SIZE);
+      try {
+        // Create a FormData object to send the file to the backend
+        const formData = new FormData();
+        formData.append('file', file);
 
-      reader.onload = async (e) => {
-        const fileContentChunk = e.target?.result as string;
-        if (!fileContentChunk) {
-            updateFileState(setter, { error: 'Could not read file content chunk.', isLoading: false });
-            return;
+        // Call the backend API to process the file
+        const response = await fetch('http://localhost:8000/api/file/preview', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Server error: ${response.status} - ${errorText}`);
         }
 
-        try {
-            // Pass the chunk and the original filename
-            const result: FilePreviewResult = await window.electronAPI.readFilePreview(fileContentChunk, fileName);
-            console.log(`[React] Preview result received for ${type}:`, result);
+        const result = await response.json();
+        console.log(`[React] Preview result received for ${type}:`, result);
 
-            if (result.error) {
-              updateFileState(setter, { error: result.error, isLoading: false });
-            } else if (result.headers && result.previewRows) {
-              updateFileState(setter, {
-                 headers: result.headers,
-                 previewRows: result.previewRows,
-                 error: null,
-                 isLoading: false,
-                 // Reset mappings
-                 geneCol: undefined, xCol: undefined, yCol: undefined, layerCol: undefined,
-                 ligandCol: undefined, receptorCol: undefined, moduleCol: undefined
-              });
-            } else {
-              updateFileState(setter, { error: 'Invalid response from preview reader.', isLoading: false });
+        if (result.error) {
+          updateFileState(setter, { error: result.error, isLoading: false });
+        } else if (result.headers && result.previewRows) {
+          updateFileState(setter, {
+            headers: result.headers,
+            previewRows: result.previewRows,
+            fileInfo: result.fileInfo, // Store file info if available (for H5AD)
+            error: null,
+            isLoading: false,
+            // Reset mappings
+            geneCol: undefined, xCol: undefined, yCol: undefined, layerCol: undefined,
+            ligandCol: undefined, receptorCol: undefined, moduleCol: undefined
+          });
+          
+          // Auto-detect and map columns for H5AD files if possible
+          if (fileName.endsWith('.h5ad') && result.headers) {
+            const headerMap: Record<string, string> = {};
+            
+            // Try to auto-map common column names
+            result.headers.forEach((header: string) => {
+              const lowerHeader = header.toLowerCase();
+              
+              // Match column names based on common naming conventions
+              if (type === 'spatial') {
+                if (lowerHeader.includes('gene') || lowerHeader === 'index') 
+                  headerMap.geneCol = header;
+                else if (lowerHeader === 'x' || lowerHeader.includes('coord_x')) 
+                  headerMap.xCol = header;
+                else if (lowerHeader === 'y' || lowerHeader.includes('coord_y')) 
+                  headerMap.yCol = header;
+                else if (lowerHeader.includes('layer') || lowerHeader.includes('cluster')) 
+                  headerMap.layerCol = header;
+              } else if (type === 'interactions') {
+                if (lowerHeader.includes('ligand')) 
+                  headerMap.ligandCol = header;
+                else if (lowerHeader.includes('receptor')) 
+                  headerMap.receptorCol = header;
+              } else if (type === 'modules') {
+                if (lowerHeader.includes('gene') || lowerHeader === 'index') 
+                  headerMap.geneCol = header;
+                else if (lowerHeader.includes('module') || lowerHeader.includes('cluster')) 
+                  headerMap.moduleCol = header;
+              }
+            });
+            
+            // Apply the auto-mappings
+            if (Object.keys(headerMap).length > 0) {
+              console.log(`[React] Auto-mapped columns for ${type}:`, headerMap);
+              updateFileState(setter, headerMap);
             }
-        } catch (ipcError) {
-            const errorMessage = ipcError instanceof Error ? ipcError.message : String(ipcError);
-            updateFileState(setter, { error: `Error communicating with main process: ${errorMessage}`, isLoading: false });
-        }
-      };
-
-      reader.onerror = (e) => {
-        updateFileState(setter, { error: 'Failed to read file chunk.', isLoading: false });
-      };
-
-      // Read the BLOB SLICE as text
-      reader.readAsText(blobSlice);
-
-      // H5AD still needs separate handling (cannot read slice as text)
-      if (fileName.endsWith('.h5ad')) {
-          reader.abort(); // Stop the text reader if it was started
-          try {
-            const result = await window.electronAPI.readFilePreview("", fileName);
-            if (result.error) {
-                updateFileState(setter, { error: result.error, isLoading: false });
-            } else {
-                updateFileState(setter, { error: 'Unexpected success from H5AD preview?', isLoading: false });
-            }
-          } catch (ipcError) {
-              const errorMessage = ipcError instanceof Error ? ipcError.message : String(ipcError);
-              updateFileState(setter, { error: `Error communicating with main process: ${errorMessage}`, isLoading: false });
           }
-          event.target.value = '';
-          return; // Don't proceed further for H5AD for now
+        } else {
+          updateFileState(setter, { error: 'Invalid response from server.', isLoading: false });
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        updateFileState(setter, { error: `Error processing file: ${errorMessage}`, isLoading: false });
       }
 
       // Clear the input value so the same file can be selected again if needed
@@ -170,9 +185,8 @@ const DataInputPage: React.FC = () => {
   };
 
   const canProcess = checkRequiredMapping(spatialFile, 'spatial') &&
-                     checkRequiredMapping(interactionsFile, 'interactions');
-                     // Module file is optional, but if present, must be mapped
-                     // (Add checkRequiredMapping(modulesFile, 'modules') if modulesFile.file)
+                     checkRequiredMapping(interactionsFile, 'interactions') &&
+                     checkRequiredMapping(modulesFile, 'modules');
 
   // Convert FileState and mapping config to ColumnMapper props format
   const getColumnMapperProps = (fileState: FileState, type: FileType) => {
@@ -224,7 +238,7 @@ const DataInputPage: React.FC = () => {
           onFileChange={handleFileChange}
           onRemoveFile={handleRemoveFile}
           title="Spatial Data Upload"
-          description="Required columns: Gene ID, X coordinate, Y coordinate. Optional: Layer."
+          description="Required columns: Gene ID, X coordinate, Y coordinate, Layer."
         />
         
         {spatialFile.file && !spatialFile.error && spatialFile.headers.length > 0 && (
@@ -238,6 +252,7 @@ const DataInputPage: React.FC = () => {
               rows={spatialFile.previewRows}
               isLoading={spatialFile.isLoading}
               error={spatialFile.error}
+              fileInfo={spatialFile.fileInfo}
             />
           </>
         )}
@@ -267,6 +282,7 @@ const DataInputPage: React.FC = () => {
               rows={interactionsFile.previewRows}
               isLoading={interactionsFile.isLoading}
               error={interactionsFile.error}
+              fileInfo={interactionsFile.fileInfo}
             />
           </>
         )}
@@ -274,7 +290,7 @@ const DataInputPage: React.FC = () => {
 
       {/* Modules Data Section */}
       <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>3. Module Data (Optional)</h2>
+        <h2 className={styles.sectionTitle}>3. Module Data</h2>
         
         <FileUploader
           fileState={modulesFile}
@@ -296,6 +312,7 @@ const DataInputPage: React.FC = () => {
               rows={modulesFile.previewRows}
               isLoading={modulesFile.isLoading}
               error={modulesFile.error}
+              fileInfo={modulesFile.fileInfo}
             />
           </>
         )}

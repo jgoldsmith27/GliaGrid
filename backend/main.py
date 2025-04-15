@@ -1,19 +1,18 @@
-from fastapi import FastAPI
+"""Main entry point for the GliaGrid backend application."""
 import uvicorn
 import os
-from dotenv import load_dotenv
 
-# Load environment variables (optional but good practice)
-load_dotenv()
+from app.core.config import settings
+from app.core.app_factory import create_app
 
-app = FastAPI()
-
-@app.get("/ping")
-async def ping():
-    """Basic health check endpoint."""
-    return {"message": "Backend is alive!"}
+# Create FastAPI app
+app = create_app()
 
 if __name__ == "__main__":
-    port = int(os.getenv("BACKEND_PORT", 8000)) # Default to 8000 if not set
-    print(f"Starting backend server on port {port}...")
-    uvicorn.run("main:app", host="127.0.0.1", port=port, reload=True)
+    print(f"Starting {settings.PROJECT_NAME} backend on {settings.HOST}:{settings.PORT}...")
+    uvicorn.run(
+        "main:app", 
+        host="127.0.0.1",  # Explicitly use loopback IP to avoid hostname issues
+        port=settings.PORT, 
+        reload=settings.RELOAD
+    )

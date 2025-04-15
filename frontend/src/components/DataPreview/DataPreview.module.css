@@ -52,4 +52,35 @@
 .errorText {
   color: #dc3545;
   font-weight: bold;
+}
+
+.fileInfo {
+  background-color: #f8f9fa;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 12px;
+  margin-bottom: 15px;
+  font-size: 0.9em;
+}
+
+.fileInfo h5 {
+  color: #333;
+  margin-top: 0;
+  margin-bottom: 10px;
+  font-size: 1em;
+}
+
+.keyList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.keyItem {
+  background-color: #e9ecef;
+  border-radius: 3px;
+  padding: 3px 6px;
+  font-size: 0.8em;
+  color: #495057;
 } 

@@ -23,16 +23,16 @@ To create an intuitive, cross-platform application that empowers researchers to:
 ### 1. Data Input & Management
     *   Supports CSV and H5AD file formats.
     *   Intuitive interface for uploading:
-        *   **Spatial Data:** Requires columns for Gene ID, X coordinate, Y coordinate. Layer column is optional. Allows multiple file uploads for comparison.
+        *   **Spatial Data:** Requires columns for Gene ID, X coordinate, Y coordinate, and Layer. Allows multiple file uploads for comparison.
         *   **Interaction Data:** Requires columns for Ligand, Receptor. (Note: Complex receptors should use underscore separation, e.g., `ReceptorA_ReceptorB`).
         *   **Module Data:** Requires columns for Gene ID, Module ID.
-    *   **Column Mapping:** User-friendly interface to map columns from uploaded files to the required data fields (Gene, X, Y, Layer, Ligand, Receptor, Module). No need for pre-formatting file headers.
+    *   **Column Mapping:** User-friendly interface to map columns from uploaded files to the required data fields (Gene, X, Y, Layer, Ligand, Receptor, Module). All mappings are required.
     *   **Data Preview:** Display headers and the first 5 rows of uploaded files for verification.
     *   Ability to revisit and modify data inputs.
 
 ### 2. Analysis Pipeline
     *   Adapts logic from the reference `layer_analysis` scripts.
-    *   **Analysis Scope:** Performs calculations for **both the entire tissue and layer-by-layer** (if layer data is provided). Results for both scopes will be clearly presented and accessible in the UI.
+    *   **Analysis Scope:** Performs calculations for **both the entire tissue and layer-by-layer**. Results for both scopes will be clearly presented and accessible in the UI.
     *   **Processing Stages:**
         *   **Stage 1 (Initial):** Calculates counts of unique ligands and receptors present in the spatial data (whole tissue and per layer).
         *   **Stage 2 (Concurrent):** Once Stage 1 is complete, Pathway Dominance and Module Context analyses can run concurrently.
@@ -45,8 +45,7 @@ To create an intuitive, cross-platform application that empowers researchers to:
 
     *   **Basic Sample View:**
         *   Displays spatial coordinates of spots.
-        *   Color-codes spots by layer (if available).
-        *   Provides a default visualization if no layer data is present (e.g., density plot or uniform color).
+        *   Color-codes spots by layer.
     *   **Advanced Interaction Visualization:**
         *   Overlay pathway/interaction information onto the spatial plot.
         *   Visualize interaction scores spatially using different metrics:
