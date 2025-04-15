@@ -20,4 +20,17 @@
 
 .controlGroup {
     margin-bottom: 20px; /* Space between control sections */
+}
+
+/* Ensure labels within control groups have sufficient contrast */
+.controlGroup label {
+    color: #222; /* Use a darker gray or black for better contrast */
+    margin-left: 5px; /* Add some spacing if needed */
+    vertical-align: middle; /* Align label nicely with radio button */
+}
+
+/* Optional: Style the input element itself if needed */
+.controlGroup input[type="radio"] {
+    margin-right: 5px;
+    vertical-align: middle;
 } 

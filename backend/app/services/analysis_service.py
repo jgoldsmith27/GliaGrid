@@ -187,6 +187,34 @@ class AnalysisService:
             error_message = f"An unexpected error occurred during analysis: {str(e)}"
             logger.exception(f"Job {job_id}: Failed with Exception - {error_message}")
             await self._update_job_status(job_id, {"status": "failed", "message": error_message})
+        finally:
+            # --- Cleanup uploaded files --- 
+            logger.info(f"Job {job_id}: Cleaning up temporary files...")
+            files_to_delete = []
+            if hasattr(payload, 'spatialFileId') and payload.spatialFileId:
+                try:
+                    files_to_delete.append(FileService.get_file_path(payload.spatialFileId))
+                except HTTPException as e:
+                     logger.warning(f"Job {job_id}: Could not find spatial file {payload.spatialFileId} for cleanup: {e.detail}")
+            if hasattr(payload, 'interactionsFileId') and payload.interactionsFileId:
+                try:
+                    files_to_delete.append(FileService.get_file_path(payload.interactionsFileId))
+                except HTTPException as e:
+                     logger.warning(f"Job {job_id}: Could not find interactions file {payload.interactionsFileId} for cleanup: {e.detail}")
+            if hasattr(payload, 'modulesFileId') and payload.modulesFileId:
+                 try:
+                    files_to_delete.append(FileService.get_file_path(payload.modulesFileId))
+                 except HTTPException as e:
+                     logger.warning(f"Job {job_id}: Could not find modules file {payload.modulesFileId} for cleanup: {e.detail}")
+            
+            for file_path in files_to_delete:
+                try:
+                    if file_path.exists():
+                        file_path.unlink()
+                        logger.info(f"Job {job_id}: Deleted temporary file: {file_path}")
+                except OSError as e:
+                    logger.error(f"Job {job_id}: Error deleting temporary file {file_path}: {e}")
+            # -----------------------------
 
     def _load_and_standardize(self, file_path: Path, mapping: AnalysisMapping, standard_cols_map: Dict[str, str]) -> pd.DataFrame:
         """Loads data from CSV or H5AD and standardizes columns based on mapping."""

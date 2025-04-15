@@ -31,8 +31,9 @@ class FileService:
         '.h5ad': 'process_h5ad',
     }
     
-    # Directory for storing uploaded files (relative to backend root)
-    TEMP_STORAGE_DIR = Path("temp/uploads") 
+    # Directory for storing uploaded files (relative to backend script location)
+    # Go up one level from backend/app/services to backend/, then up to project root, then into .temp_uploads
+    TEMP_STORAGE_DIR = Path(__file__).resolve().parent.parent.parent / ".temp_uploads"
     
     @classmethod
     def initialize_storage(cls):
