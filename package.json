@@ -1,0 +1,30 @@
+{
+  "name": "gliagrid",
+  "version": "1.0.0",
+  "description": "",
+  "main": "main.js",
+  "scripts": {
+    "start": "concurrently \"npm:start-react\" \"npm:start-backend\" \"npm:start-electron\"",
+    "start-react": "cd frontend && npm run dev",
+    "start-backend": "cd backend && source venv/bin/activate && python main.py",
+    "start-electron": "wait-on http://localhost:5173 && electron .",
+    "build": "npm run build-react && npm run build-electron",
+    "build-react": "cd frontend && npm run build",
+    "build-electron": "electron-builder",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "electron": "^35.1.5",
+    "electron-builder": "^26.0.12",
+    "electron-is-dev": "^3.0.1",
+    "wait-on": "^8.0.3"
+  },
+  "dependencies": {
+    "node-fetch": "^2.7.0",
+    "papaparse": "^5.5.2"
+  }
+}

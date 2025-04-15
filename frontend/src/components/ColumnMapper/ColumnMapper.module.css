@@ -1,0 +1,66 @@
+.container {
+  margin-bottom: 20px;
+}
+
+.title {
+  color: #333;
+  font-size: 1.1em;
+  margin-bottom: 5px;
+}
+
+.description {
+  color: #333;
+  margin-bottom: 15px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 10px;
+  margin-bottom: 15px;
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background-color: #f9f9f9;
+}
+
+.label {
+  color: #333;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.select {
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background-color: white;
+  color: #333;
+  font-size: 0.9em;
+}
+
+.select:focus {
+  outline: none;
+  border-color: #007bff;
+  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+}
+
+.requiredIndicator {
+  color: #dc3545;
+  margin-left: 3px;
+}
+
+.loadingText {
+  color: #007bff;
+  font-style: italic;
+}
+
+.errorText {
+  color: #dc3545;
+  font-weight: bold;
+} 
