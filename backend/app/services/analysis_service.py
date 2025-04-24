@@ -17,16 +17,15 @@ logger = logging.getLogger(__name__)
 # Assume these functions exist and are structured correctly
 # You will need to replace these with your actual imports and function calls
 try:
-    # Attempt to import from the layer_analysis directory
-    # Ensure layer_analysis is in Python's path or adjust import structure
-    from layer_analysis.analysis_logic import ( 
-        run_stage1_counts,
-        run_pathway_dominance,
-        run_module_context
+    # Attempt to import from the correct location within the app
+    from app.analysis_logic.core import ( 
+        run_stage1_counts_pipeline,
+        run_pathway_dominance_pipeline,
+        run_module_context_pipeline
     )
-    print("Successfully imported analysis functions from layer_analysis")
+    logger.info("Successfully imported analysis functions from app.analysis_logic.core")
 except ImportError as e:
-    logger.warning(f"Could not import from layer_analysis: {e}. Using placeholder functions.")
+    logger.warning(f"Could not import from app.analysis_logic.core: {e}. Using placeholder functions.")
     # Define placeholder functions if import fails, so the service still runs
     def run_stage1_counts(spatial_df, interactions_df):
         logger.warning("Using placeholder run_stage1_counts")
@@ -59,10 +58,10 @@ except ImportError as e:
         # Simulate module context results for whole tissue and layers
         layers = list(spatial_df['layer'].unique())
         results = {
-            'whole_tissue': pd.DataFrame([{'ligand': 'L1', 'receptor': 'R1', 'type': 'intra-module'}, {'ligand': 'L2', 'receptor': 'R2', 'type': 'inter-module'}])
+            'whole_tissue': pd.DataFrame([{'ligand': 'L1', 'receptor': 'R1', 'interaction_type': 'intra-module'}, {'ligand': 'L2', 'receptor': 'R2', 'interaction_type': 'inter-module'}])
         }
         for layer in layers:
-            results[layer] = pd.DataFrame([{'ligand': 'L1', 'receptor': 'R1', 'type': 'intra-module'}, {'ligand': 'L3', 'receptor': 'R3', 'type': 'inter-module'}])
+            results[layer] = pd.DataFrame([{'ligand': 'L1', 'receptor': 'R1', 'interaction_type': 'intra-module'}, {'ligand': 'L3', 'receptor': 'R3', 'interaction_type': 'inter-module'}])
         # Convert DataFrames to dicts for JSON serialization
         return {scope: df.to_dict('records') for scope, df in results.items()}
 # ---------------------------------------------------------
@@ -137,7 +136,7 @@ class AnalysisService:
             # 2. Run Stage 1: Initial Counts
             await self._update_job_status(job_id, {"message": "Calculating ligand/receptor counts...", "progress": 0.4})
             logger.info(f"Job {job_id}: Running Stage 1 Counts...")
-            count_results = run_stage1_counts(spatial_df, interactions_df)
+            count_results = run_stage1_counts_pipeline(spatial_df, interactions_df)
             # Structure results: {scope: {analysis_type: data}}
             for scope, counts in count_results.items():
                 if scope not in final_results: final_results[scope] = {}
@@ -150,7 +149,7 @@ class AnalysisService:
             # 3a. Pathway Dominance
             await self._update_job_status(job_id, {"message": "Calculating pathway dominance...", "progress": 0.6})
             logger.info(f"Job {job_id}: Running Pathway Dominance...")
-            pathway_results = run_pathway_dominance(spatial_df, interactions_df)
+            pathway_results = run_pathway_dominance_pipeline(spatial_df, interactions_df)
             for scope, pathways in pathway_results.items():
                  if scope not in final_results: final_results[scope] = {}
                  final_results[scope]['pathway_dominance'] = pathways # pathways assumed to be list of dicts
@@ -162,7 +161,7 @@ class AnalysisService:
             logger.info(f"Job {job_id}: Running Module Context...")
             # Module context might depend on pathway results (e.g., significant pairs)
             # Pass pathway_results if needed by the actual function
-            module_context_results = run_module_context(spatial_df, interactions_df, modules_df, pathway_results)
+            module_context_results = run_module_context_pipeline(spatial_df, interactions_df, modules_df, pathway_results)
             for scope, modules in module_context_results.items():
                  if scope not in final_results: final_results[scope] = {}
                  final_results[scope]['module_context'] = modules # modules assumed to be list of dicts

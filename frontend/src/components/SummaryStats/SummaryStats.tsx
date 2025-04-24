@@ -1,12 +1,13 @@
 import React from 'react';
 import styles from './SummaryStats.module.css';
+import { SummaryStatsData } from '../../types/analysisResults';
 
 interface SummaryStatsProps {
-  data: { [key: string]: number } | null; // Expects e.g., { unique_ligands: 100, unique_receptors: 120 }
+  data: SummaryStatsData | null;
 }
 
 const SummaryStats: React.FC<SummaryStatsProps> = ({ data }) => {
-  if (!data || Object.keys(data).length === 0) {
+  if (!data) {
     return <p className={styles.noData}>No summary statistics available.</p>;
   }
 
