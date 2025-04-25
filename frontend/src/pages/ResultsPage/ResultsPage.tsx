@@ -109,6 +109,21 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
 
   }, [jobId]); // Re-run effect if jobId changes
 
+  // Effect to ensure a layer is selected when in 'layers' scope
+  useEffect(() => {
+    // Extract available layers from results
+    const availableLayers = jobStatus?.results ? 
+      Object.keys(jobStatus.results).filter(k => k !== 'whole_tissue') : [];
+    
+    // If we're in layer scope and no layer is selected, select the first available layer
+    if (selectedScope === 'layers' && 
+        (selectedLayers.length === 0 || !availableLayers.includes(selectedLayers[0]))) {
+      if (availableLayers.length > 0) {
+        setSelectedLayers([availableLayers[0]]);
+      }
+    }
+  }, [selectedScope, jobStatus, selectedLayers]);
+
   // --- UI Rendering --- 
 
   // Display connection status or initial loading message
@@ -161,7 +176,7 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
   // We have successful results here
   const results = jobStatus.results;
 
-  // TODO: Extract available layers from results for the LayerSelector
+  // Extract available layers from results for the LayerSelector
   const availableLayers = results ? Object.keys(results).filter(k => k !== 'whole_tissue') : [];
 
   // TODO: Filter/select data based on state (selectedScope, selectedLayers, selectedAnalysisType)
@@ -171,7 +186,7 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
       let scopeData = selectedScope === 'whole_tissue' 
           ? results.whole_tissue 
           : selectedLayers.length > 0 
-              ? results[selectedLayers[0]] // Simplistic: show first selected layer for now
+              ? results[selectedLayers[0]] // Show the selected layer
               : null;
 
       if (!scopeData) return null;

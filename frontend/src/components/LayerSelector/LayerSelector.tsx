@@ -13,17 +13,10 @@ const LayerSelector: React.FC<LayerSelectorProps> = ({
   onLayersChange,
 }) => {
   
-  const handleCheckboxChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleRadioChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const layerName = event.target.value;
-    const isChecked = event.target.checked;
-
-    if (isChecked) {
-      // Add layer to selection
-      onLayersChange([...selectedLayers, layerName]);
-    } else {
-      // Remove layer from selection
-      onLayersChange(selectedLayers.filter(layer => layer !== layerName));
-    }
+    // For radio buttons, we only need to set the selected layer
+    onLayersChange([layerName]);
   };
 
   if (availableLayers.length === 0) {
@@ -37,22 +30,22 @@ const LayerSelector: React.FC<LayerSelectorProps> = ({
 
   return (
     <div className={styles.layerSelector}>
-      <h3 className={styles.title}>Select Layer(s)</h3>
+      <h3 className={styles.title}>Select Layer</h3>
       <div className={styles.optionsList}>
         {availableLayers.map(layer => (
           <label key={layer} className={styles.optionLabel}>
             <input
-              type="checkbox"
+              type="radio"
+              name="layer"
               value={layer}
               checked={selectedLayers.includes(layer)}
-              onChange={handleCheckboxChange}
-              className={styles.checkboxInput}
+              onChange={handleRadioChange}
+              className={styles.radioInput}
             />
             {layer}
           </label>
         ))}
       </div>
-      {/* Optional: Add Select All / Deselect All buttons later */}
     </div>
   );
 };
