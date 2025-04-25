@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'; // Import useParams
 import styles from './ResultsPage.module.css';
 import ControlPanel from '../../components/ControlPanel/ControlPanel';
 import DisplayPanel from '../../components/DisplayPanel/DisplayPanel';
+import LoadingSpinner from '../../components/LoadingSpinner/LoadingSpinner';
 
 // Define types for the selections
 type ScopeType = 'whole_tissue' | 'layers';
@@ -114,7 +115,7 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
   if (!isConnected && isLoading && !error) {
      return (
       <div className={styles.container}>
-        <h1>Connecting to Analysis Stream...</h1>
+        <LoadingSpinner message="Connecting to Analysis Stream..." />
       </div>
     );
   }
@@ -122,12 +123,19 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
   if (isLoading && isConnected) {
     return (
       <div className={styles.container}>
-        <h1>Loading Analysis Results...</h1>
-        {jobStatus && jobStatus.message && <p>{jobStatus.message}</p>}
-        {/* Optional: Add a spinner or refined progress indicator here */}
+        <LoadingSpinner message={jobStatus?.message || "Loading Analysis Results..."} />
         {jobStatus && jobStatus.progress !== null && jobStatus.progress !== undefined && (
           <progress value={jobStatus.progress} max="1"></progress>
         )}
+      </div>
+    );
+  }
+
+  // Always show loading until we have valid results
+  if (!jobStatus || !jobStatus.results) {
+    return (
+      <div className={styles.container}>
+        <LoadingSpinner message="Waiting for analysis results..." />
       </div>
     );
   }
@@ -141,31 +149,11 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
     );
   }
 
-  if (!jobStatus) {
-     return (
-      <div className={styles.container}>
-        <h1>No Status Information</h1>
-        <p>Could not retrieve status for job ID: {jobId}</p>
-      </div>
-    );
-  }
-
   if (jobStatus.status === 'failed') {
     return (
       <div className={styles.container}>
         <h1>Analysis Failed</h1>
         <p className={styles.errorMessage}>Error: {jobStatus.message || 'Unknown error occurred during analysis.'}</p>
-      </div>
-    );
-  }
-
-  if (jobStatus.status !== 'success' || !jobStatus.results) {
-      return (
-      <div className={styles.container}>
-        <h1>Analysis In Progress or Incomplete</h1>
-        <p>Status: {jobStatus.status}</p>
-        <p>{jobStatus.message}</p>
-        {/* Re-render loading or provide a manual refresh? */}
       </div>
     );
   }

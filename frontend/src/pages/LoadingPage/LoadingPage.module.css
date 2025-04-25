@@ -1,0 +1,212 @@
+.errorContainer {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  width: 100%;
+  padding: 2rem;
+  text-align: center;
+}
+
+.errorMessage {
+  color: #e74c3c;
+  font-weight: bold;
+  margin: 1rem 0 2rem;
+  padding: 1rem;
+  background-color: rgba(231, 76, 60, 0.1);
+  border-radius: 8px;
+  max-width: 600px;
+}
+
+.buttonPrimary {
+  padding: 0.75rem 1.5rem;
+  background-color: #3498db;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.buttonPrimary:hover {
+  background-color: #2980b9;
+}
+
+/* Enhanced Loading Page Styles */
+
+.loadingPageContainer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  width: 100%;
+  padding: 2rem;
+  background-color: rgba(255, 255, 255, 0.95);
+}
+
+.progressInfoContainer {
+  margin-top: 2rem;
+  width: 100%;
+  max-width: 600px;
+  background-color: white;
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.progressBarContainer {
+  width: 100%;
+  height: 20px;
+  background-color: #f0f0f0;
+  border-radius: 10px;
+  margin-bottom: 1rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.progressBar {
+  height: 100%;
+  background-color: #3498db;
+  border-radius: 10px;
+  transition: width 0.5s ease-in-out;
+}
+
+.progressPercentage {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 0.8rem;
+  font-weight: bold;
+  color: #333;
+}
+
+.stageInfo, .scopeInfo {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.8rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.stageLabel, .scopeLabel {
+  font-weight: bold;
+  color: #555;
+}
+
+.stageValue, .scopeValue {
+  color: #333;
+  background-color: #f8f9fa;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-family: monospace;
+}
+
+/* Manual navigation button styles */
+.manualNavigationContainer {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid #f0f0f0;
+  text-align: center;
+}
+
+.manualNavigationContainer p {
+  margin-bottom: 1rem;
+  color: #28a745;
+  font-weight: bold;
+}
+
+.manualNavigationButton {
+  padding: 0.75rem 1.5rem;
+  background-color: #28a745;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  font-weight: bold;
+}
+
+.manualNavigationButton:hover {
+  background-color: #218838;
+}
+
+.loadingTitle {
+  font-size: 2rem;
+  margin-bottom: 2rem;
+  color: #333;
+}
+
+/* Reconnect button styles */
+.reconnectContainer {
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  background-color: #fff8e1;
+  border: 1px solid #ffecb3;
+  border-radius: 4px;
+  text-align: center;
+}
+
+.reconnectContainer p {
+  margin-bottom: 0.75rem;
+  color: #996b00;
+}
+
+.reconnectButton {
+  padding: 0.5rem 1.25rem;
+  background-color: #ff9800;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.reconnectButton:hover {
+  background-color: #f57c00;
+}
+
+.reconnectButton:active {
+  background-color: #e65100;
+}
+
+/* Bypass button styles */
+.bypassContainer {
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  background-color: #e8f5e9;
+  border: 1px solid #c8e6c9;
+  border-radius: 4px;
+  text-align: center;
+}
+
+.bypassContainer p {
+  margin-bottom: 0.75rem;
+  color: #2e7d32;
+}
+
+.bypassButton {
+  padding: 0.5rem 1.25rem;
+  background-color: #4caf50;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.bypassButton:hover {
+  background-color: #388e3c;
+}
+
+.bypassButton:active {
+  background-color: #1b5e20;
+} 
