@@ -7,6 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 # Import all necessary routers
 from .api import visualization # <<< RE-ENABLED IMPORT
 from .api import file_routes, analysis_routes
+# Import the new spatial visualization router
+from .api import density_maps 
 
 # --- DEBUG: Check if router object exists after import ---
 # print(f"DEBUG: visualization.router object: {visualization.router}") # <<< REMOVED
@@ -35,6 +37,8 @@ app.include_router(analysis_routes.router, prefix="/api", tags=["Analysis"]) # <
 app.include_router(analysis_routes.ws_router, tags=["Analysis WebSocket"])
 # Include visualization routes (already present, but good to confirm)
 app.include_router(visualization.router, prefix="/api", tags=["Visualization"]) # <<< RE-ENABLED ROUTER
+# Include the new spatial visualization router
+app.include_router(density_maps.router, prefix="/api", tags=["Spatial Visualization"])
 
 @app.get("/")
 async def root():
