@@ -70,7 +70,7 @@ const DataInputPage: React.FC = () => {
         formData.append('file', file);
 
         // Call the backend API to process the file
-        const response = await fetch('http://localhost:8000/api/file/preview', {
+        const response = await fetch('http://localhost:8000/api/files/preview', {
           method: 'POST',
           body: formData,
         });

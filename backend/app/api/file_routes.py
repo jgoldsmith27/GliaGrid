@@ -14,7 +14,6 @@ TEMP_DIR.mkdir(exist_ok=True) # Ensure directory exists
 
 # Create API router
 router = APIRouter(
-    prefix="/file",
     tags=["File Handling"],
     responses={404: {"description": "Not found"}}
 )

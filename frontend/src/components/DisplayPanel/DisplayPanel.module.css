@@ -48,19 +48,29 @@
     font-style: italic;
 }
 
-.visualizationContainer {
-    margin-top: 20px;
-    border-top: 1px solid #eee;
-    padding-top: 20px;
+/* New Layout Styles */
+.tableAndVizLayout {
+    display: flex;
+    gap: 20px; /* Space between table and viz */
+    align-items: flex-start; /* Align items to the top */
 }
 
-pre {
-    background-color: #eee;
-    padding: 10px;
+.tableArea {
+    flex: 1; /* Allow table area to grow */
+    min-width: 0; /* Prevent flex item from overflowing */
+}
+
+.visualizationArea {
+    width: 400px; /* Fixed width for the visualization panel */
+    position: sticky;
+    top: 20px; /* Adjust based on header height or desired spacing */
+    height: calc(100vh - 40px); /* Example: Full viewport height minus top/bottom spacing */
+    overflow-y: auto; /* Allow scrolling within the viz panel if needed */
+    border: 1px solid #ddd;
     border-radius: 4px;
-    white-space: pre-wrap; /* Wrap long lines */
-    word-break: break-all; /* Break long words/strings */
-    font-size: 0.85em;
+    background: white;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    padding: 15px; /* Add some internal padding */
 }
 
 /* --- Table Styles --- */

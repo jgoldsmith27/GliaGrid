@@ -94,11 +94,12 @@ class AnalysisService:
     """Service to handle the analysis pipeline logic."""
 
     # Inject JobService using FastAPI's Depends
-    def __init__(self, connection_manager: Any, job_service: JobService = Depends(get_job_service)):
-        """Initialize the service with a WebSocket connection manager and JobService."""
+    # Make connection_manager optional
+    def __init__(self, job_service: JobService = Depends(get_job_service), connection_manager: Any = None):
+        """Initialize the service with JobService and optional WebSocket connection manager."""
         self.manager = connection_manager
         self.job_service = job_service # Store the injected JobService instance
-        logger.info("AnalysisService initialized with ConnectionManager and JobService.")
+        logger.info(f"AnalysisService initialized. Manager: {'Present' if self.manager else 'Absent'}, JobService: Present")
 
     # REMOVE _update_job_status - use self.job_service.update_job_status directly
     # async def _update_job_status(self, job_id: str, status_update: Dict[str, Any]):
@@ -364,4 +365,15 @@ class AnalysisService:
     # def get_job_context(job_id: str) -> dict:
     #     """Retrieves the job context using the job ID."""
     #     # ... old implementation ...
+
+    # --- MOVED the dependency function OUTSIDE the class --- 
+    # def get_analysis_service_dependency(job_service: JobService = Depends(get_job_service)) -> "AnalysisService":
+    #    # ...
+
+# --- Dependency function MOVED HERE (outside the class) ---
+def get_analysis_service_dependency(job_service: JobService = Depends(get_job_service)) -> "AnalysisService":
+    """FastAPI dependency provider for AnalysisService (without ConnectionManager)."""
+    # Note: This returns an instance without the manager, suitable for non-WebSocket endpoints
+    # It also needs to resolve the forward reference to AnalysisService correctly
+    return AnalysisService(job_service=job_service)
 

@@ -1,77 +1,50 @@
-import React from 'react';
-import styles from './ModuleContextTable.module.css'; // Assume CSS module exists or create it
+import React, { useState } from 'react';
+// Removed unused CSS module import
+// import styles from './ModuleContextTable.module.css'; 
 import { ModuleContextResult } from '../../types/analysisResults';
+// Import the generic table and its types
+import AnalysisTable, { ColumnDefinition } from '../AnalysisTable/AnalysisTable';
 
+// Update props interface to match AnalysisTable's expected handler signature
 interface ModuleContextTableProps {
   data: ModuleContextResult[] | null;
+  // Expect the handler from parent to take row and index
+  onRowClick?: (row: ModuleContextResult, index: number) => void; 
+  loading?: boolean;
+  selectedRowIndex?: number | null; // Accept selected index from parent
 }
 
-// Helper to format header
-const formatHeader = (key: keyof ModuleContextResult): string => {
-    switch (key) {
-        case 'ligand': return 'Ligand';
-        case 'receptor': return 'Receptor';
-        case 'interaction_type': return 'Module Context';
-        case 'ligand_module': return 'Ligand Module';
-        case 'receptor_modules': return 'Receptor Module(s)';
-        case 'is_same_module': return 'Same Module?';
-        // Add cases for other potential fields
-        default:
-            const strKey = String(key);
-            return strKey.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase());
-    }
-};
+// Define columns specifically for ModuleContextResult
+const moduleContextColumns: ColumnDefinition<ModuleContextResult>[] = [
+  { key: 'ligand', header: 'Ligand' },
+  { key: 'receptor', header: 'Receptor' },
+  { key: 'ligand_module', header: 'Ligand Module' },
+  { key: 'receptor_modules', header: 'Receptor Module(s)' }, // Array formatting handled by AnalysisTable
+  { key: 'is_same_module', header: 'Same Module?' }, // Boolean formatting handled by AnalysisTable
+  { key: 'interaction_type', header: 'Module Context' },
+];
 
-// Helper to format cell values
-const formatCellValue = (value: any): string => {
-    if (typeof value === 'boolean') {
-        return value ? 'Yes' : 'No'; // Format boolean
-    }
-    if (Array.isArray(value)) {
-        return value.join(', ') || 'N/A'; // Format array
-    }
-    if (value === null || value === undefined) {
-        return 'N/A';
-    }
-    return String(value);
-};
+const ModuleContextTable: React.FC<ModuleContextTableProps> = ({
+  data,
+  onRowClick,
+  loading = false,
+  selectedRowIndex, // Receive selected index from props
+}) => {
 
-const ModuleContextTable: React.FC<ModuleContextTableProps> = ({ data }) => {
-  if (!data || data.length === 0) {
-    return <p className={styles.noData}>No Module Context data available.</p>;
-  }
+  // No internal state or handler needed anymore
 
-  // Explicitly define columns and their order
-  const columns: (keyof ModuleContextResult)[] = [
-      'ligand',
-      'receptor',
-      'ligand_module',
-      'receptor_modules',
-      'is_same_module',
-      'interaction_type'
-  ];
+  // Let AnalysisTable handle the no data case directly
+  // if (!data || data.length === 0) { ... }
 
   return (
-    <div className={styles.tableContainer}>
-      <table className={styles.table}>
-        <thead>
-          <tr>
-            {columns.map(col => (
-              <th key={col} className={styles.th}>{formatHeader(col)}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {data.map((row, rowIndex) => (
-            <tr key={rowIndex} className={styles.tr}>
-              {columns.map(col => (
-                <td key={col} className={styles.td}>{formatCellValue(row[col])}</td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    // Removed the outer container div, assuming layout is handled by DisplayPanel
+    <AnalysisTable<ModuleContextResult> // Specify the type for generics
+      data={data}
+      columns={moduleContextColumns}
+      loading={loading}
+      onRowClick={onRowClick} // Pass parent handler directly
+      selectedRowIndex={selectedRowIndex} // Pass parent selected index directly
+    />
   );
 };
 
