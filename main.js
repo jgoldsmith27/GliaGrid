@@ -1,6 +1,5 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
-const isDev = require('electron-is-dev'); // To check if running in development
 const fs = require('fs'); // Added for file system access
 const fsPromises = require('fs').promises;
 const Papa = require('papaparse'); // Added for CSV parsing
@@ -12,7 +11,9 @@ if (!fs.existsSync(projectsDir)) {
 }
 const projectFileExtension = '.gliaproj';
 
-function createWindow() {
+async function createWindow() {
+  // Dynamically import isDev
+  const { default: isDev } = await import('electron-is-dev');
   // Create the browser window.
   const win = new BrowserWindow({
     width: 1200,

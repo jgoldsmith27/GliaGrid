@@ -22,7 +22,11 @@
     "wait-on": "^7.2.0"
   },
   "dependencies": {
+    "@deck.gl/aggregation-layers": "^9.1.11",
+    "@deck.gl/core": "^9.1.11",
+    "@deck.gl/layers": "^9.1.11",
+    "@deck.gl/react": "^9.1.11",
     "node-fetch": "^2.7.0",
     "papaparse": "^5.5.2"
   }
-} 
+}
