@@ -1,123 +1,134 @@
 .visualizationContainer {
   position: relative;
   width: 100%;
-  /* height: 400px; */ /* REMOVED fixed height */
-  /* Let parent (.visualizationArea) determine height */
-  /* Use aspect-ratio if you want the plot area to maintain shape */
-  /* aspect-ratio: 16 / 9; */ /* Example: Uncomment if needed */
-  border: 1px solid #e5e7eb; /* Use lighter border */
-  border-radius: 6px; /* Consistent radius */
+  border: 1px solid #e2e8f0; /* Cool Gray 200 */
+  border-radius: 8px; /* Match panels */
   overflow: hidden;
   background: white;
-  display: flex; /* Use flex to make deckGlWrapper fill height */
+  display: flex; 
   flex-direction: column;
+  height: 550px; /* Set an explicit height */
 }
 
 /* Ensure DeckGL wrapper fills the container */
 .deckGlWrapper {
   position: relative; 
   width: 100%;
-  /* height: 100%; */ /* Let flex-grow handle height */
-  flex-grow: 1; /* Make this fill the available space */
-  min-height: 250px; /* Ensure it doesn't collapse too small */
+  flex-grow: 1; 
 }
 
 /* --- Density Map Controls Section --- */
-/* Styles for the container holding the density map controls */
-/* Added to the bottom of the file or integrated logically */
-
 .densityMapSection {
-  padding: 16px;
-  border-top: 1px solid #e5e7eb; /* Separator line */
-  background-color: #f9fafb; /* Slightly different background */
+  padding: 20px 24px; /* Increase padding */
+  border-top: 1px solid #e2e8f0; /* Cool Gray 200 */
+  background-color: #f8fafc; /* Cool Gray 50 */
 }
 
 .densityMapSection h4 {
   margin-top: 0;
-  margin-bottom: 12px;
-  font-size: 1.1em;
+  margin-bottom: 16px;
+  font-size: 1.0em;
   font-weight: 600;
-  color: #374151;
+  color: #334155; /* Cool Gray 700 */
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .densityMapControls {
   display: flex;
   align-items: center;
-  gap: 12px;
-  flex-wrap: wrap; /* Allow controls to wrap on small screens */
+  gap: 16px;
+  flex-wrap: wrap; 
 }
 
 .densityMapControls label {
   font-weight: 500;
   font-size: 0.9em;
-  color: #4b5563;
+  color: #475569; /* Cool Gray 600 */
 }
 
 .vizSelect {
-  padding: 6px 10px;
+  padding: 8px 12px; /* Standardize padding */
   border-radius: 6px;
-  border: 1px solid #d1d5db;
+  border: 1px solid #cbd5e1; /* Cool Gray 300 */
   background-color: #fff;
   font-size: 0.9em;
-  flex-grow: 1; /* Allow select to take available space */
-  min-width: 150px; /* Prevent excessive shrinking */
+  flex-grow: 1; 
+  min-width: 180px; /* Adjusted */
+  color: #334155; /* Cool Gray 700 */
+  appearance: none;
+  background-image: url('data:image/svg+xml;charset=UTF-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="%2394a3b8"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>');
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 1em 1em;
+}
+.vizSelect:focus {
+    outline: none;
+    border-color: #3b82f6; 
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2); 
 }
 
 .generateButton {
-  padding: 6px 12px;
+  padding: 8px 16px; /* Standardize padding */
   border-radius: 6px;
-  border: 1px solid transparent;
-  background-color: #3b82f6; /* Blue */
+  border: none; /* Remove border */
+  background-color: #2563eb; /* Blue 600 */
   color: white;
   font-weight: 500;
+  font-size: 0.9em;
   cursor: pointer;
   transition: background-color 0.2s;
   white-space: nowrap;
 }
 
 .generateButton:hover {
-  background-color: #2563eb;
+  background-color: #1d4ed8; /* Blue 700 */
 }
 
 .generateButton:disabled {
-  background-color: #9ca3af;
+  background-color: #d1d5db; /* Cool Gray 300 */
+  color: #6b7280; /* Cool Gray 500 */
   cursor: not-allowed;
 }
 
 .errorMessage {
-   color: #dc2626;
+   color: #b91c1c; /* Red 700 */
    font-size: 0.9em;
-   margin-top: 10px;
+   margin-top: 12px;
+   font-weight: 500;
 }
 
 .densityMapDisplay {
-  margin-top: 16px;
-  text-align: center; /* Center loading text/image */
+  margin-top: 20px;
+  text-align: center; 
 }
 
 .densityMapImage {
   max-width: 100%;
   height: auto;
-  border-radius: 4px;
-  border: 1px solid #e5e7eb;
-  margin-bottom: 10px;
+  border-radius: 6px; /* Match container */
+  border: 1px solid #e2e8f0; /* Cool Gray 200 */
+  margin-bottom: 16px;
 }
 
 .scoresDisplay {
   font-size: 0.85em;
-  color: #4b5563;
+  color: #334155; /* Cool Gray 700 */
   text-align: left;
-  margin-top: 10px;
-  background-color: #f9fafb;
-  padding: 8px 12px;
-  border-radius: 4px;
-  border: 1px solid #e5e7eb;
+  margin-top: 16px;
+  background-color: #f1f5f9; /* Cool Gray 100 */
+  padding: 12px 16px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0; /* Cool Gray 200 */
 }
 
 .scoresDisplay h5 {
-  margin: 0 0 5px 0;
+  margin: 0 0 8px 0;
   font-weight: 600;
-  color: #374151;
+  color: #334155; /* Cool Gray 700 */
+  font-size: 0.9em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .scoresDisplay ul {
@@ -127,7 +138,8 @@
 }
 
 .scoresDisplay li {
-  margin-bottom: 3px;
+  margin-bottom: 4px;
+  line-height: 1.4;
 }
 
 
@@ -137,18 +149,17 @@
   top: 0;
   left: 0;
   width: 100vw;
-  height: 100vh;
+  height: 100vh; /* Overrides the fixed height */
   z-index: 100000;
   border-radius: 0;
   border: none;
-  background: white; /* Ensure bg covers everything */
+  background: white; 
 }
 
 .fullscreen .deckGlWrapper {
-    min-height: unset; /* Remove min-height in fullscreen */
+    min-height: unset; 
 }
 
-/* Hide Density Map Section in Fullscreen (already handled by component logic, but good safety) */
 .fullscreen .densityMapSection {
     display: none;
 }
@@ -156,55 +167,57 @@
 /* Adjust overlay controls styling */
 .deckOverlayControls {
   position: absolute;
-  top: 10px;
-  right: 10px;
+  top: 16px;
+  right: 16px;
   z-index: 10;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 10px;
-  background-color: rgba(255, 255, 255, 0.85); /* Slightly more opaque */
-  padding: 10px;
-  border-radius: 6px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  gap: 12px;
+  background-color: rgba(255, 255, 255, 0.9); /* More opaque */
+  padding: 12px;
+  border-radius: 8px; /* Match panels */
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1); /* Tailwind shadow-md */
 }
 
-/* Update button styles to be consistent */
+/* Update button styles */
 .deckOverlayControls button {
-    background: rgba(255, 255, 255, 0.9);
-    border: 1px solid #d1d5db;
+    background: #fff;
+    border: 1px solid #cbd5e1; /* Cool Gray 300 */
     border-radius: 6px;
-    padding: 4px 8px;
+    padding: 6px 10px;
     cursor: pointer;
-    font-size: 14px; 
-    color: #374151;
-    transition: background-color 0.2s;
+    font-size: 0.9em; 
+    font-weight: 500;
+    color: #334155; /* Cool Gray 700 */
+    transition: background-color 0.2s, border-color 0.2s;
 }
 .deckOverlayControls button:hover {
-    background: #f9fafb;
+    background: #f8fafc; /* Cool Gray 50 */
+    border-color: #94a3b8; /* Cool Gray 400 */
 }
 
 .zoomControls {
   display: flex;
-  gap: 6px;
+  gap: 8px;
 }
 
 /* Legend styling */
 .legend {
   background: rgba(255, 255, 255, 0.90);
-  padding: 10px 12px;
+  padding: 12px 16px;
   border-radius: 6px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
-  border: 1px solid #e5e7eb;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  border: 1px solid #e2e8f0; /* Cool Gray 200 */
 }
 
 .legendItem {
   display: flex;
   align-items: center;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
   font-size: 0.9em;
   font-weight: 500;
-  color: #374151;
+  color: #334155; /* Cool Gray 700 */
 }
 .legendItem:last-child {
     margin-bottom: 0;
@@ -213,7 +226,7 @@
 .legendColor {
   width: 14px;
   height: 14px;
-  margin-right: 8px;
+  margin-right: 10px;
   border-radius: 3px;
   border: 1px solid rgba(0, 0, 0, 0.1);
 } 

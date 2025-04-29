@@ -1,26 +1,53 @@
-.scopeSelector { /* Wrapper */ }
+.scopeSelector {
+    /* Container for the scope selection */
+    border: none; /* Remove border - parent panel provides separation */
+    border-radius: 0;
+    padding: 0; /* Remove padding */
+    background-color: transparent;
+}
 
 .title {
     margin-top: 0;
-    margin-bottom: 8px;
-    font-size: 1em;
-    color: #555;
+    margin-bottom: 12px;
+    font-size: 0.9em;
+    font-weight: 600;
+    /* color: #475569; */ /* Cool Gray 600 */
+    color: #1e293b; /* Cool Gray 800 */
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
 }
 
-.options {
+.optionsContainer {
     display: flex;
-    flex-direction: column; /* Stack options vertically */
-    gap: 5px;
+    flex-direction: column; 
+    gap: 10px; /* Increase gap */
 }
 
-.optionLabel {
-    display: flex;
-    align-items: center;
+.option {
+    display: block; 
+    padding: 10px 12px; /* Increase padding */
+    border-radius: 6px;
     cursor: pointer;
+    transition: background-color 0.2s, border-color 0.2s;
+    border: 1px solid #e2e8f0; /* Cool Gray 200 */
+    background-color: #fff;
+}
+
+.option:hover {
+    background-color: #f8fafc; /* Cool Gray 50 */
+    border-color: #cbd5e1; /* Cool Gray 300 */
+}
+
+.option input[type="radio"] {
+    margin-right: 10px; /* More space */
+    vertical-align: middle;
+    accent-color: #3b82f6; /* Style radio button color */
+}
+
+.option label {
+    vertical-align: middle;
+    /* color: #334155; */ /* Cool Gray 700 */
+    color: #1e293b; /* Cool Gray 800 */
     font-size: 0.95em;
-}
-
-.radioInput {
-    margin-right: 8px;
-    cursor: pointer;
+    font-weight: 500;
 } 

@@ -1,36 +1,31 @@
 .controlPanel {
-    /* Add styles specific to the control panel wrapper if needed */
+    /* No specific styles needed for wrapper */
 }
 
 .title {
     margin-top: 0;
-    margin-bottom: 15px;
-    font-size: 1.2em;
-    color: #444;
-    border-bottom: 1px solid #eee;
-    padding-bottom: 5px;
+    margin-bottom: 24px; /* More space below title */
+    font-size: 1.25em; /* Slightly larger */
+    font-weight: 600;
+    color: #1e293b; /* Cool Gray 800 */
+    border-bottom: 1px solid #e2e8f0; /* Cool Gray 200 */
+    padding-bottom: 12px;
 }
 
 .subTitle {
-    margin-top: 10px;
-    margin-bottom: 8px;
-    font-size: 1em;
-    color: #555;
+    margin-top: 20px; /* More space above subtitles */
+    margin-bottom: 12px;
+    font-size: 1.0em;
+    font-weight: 600;
+    color: #1e293b; /* Cool Gray 800 */
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
 }
 
 .controlGroup {
-    margin-bottom: 20px; /* Space between control sections */
+    margin-bottom: 24px; /* Consistent spacing */
 }
 
-/* Ensure labels within control groups have sufficient contrast */
-.controlGroup label {
-    color: #222; /* Use a darker gray or black for better contrast */
-    margin-left: 5px; /* Add some spacing if needed */
-    vertical-align: middle; /* Align label nicely with radio button */
-}
-
-/* Optional: Style the input element itself if needed */
-.controlGroup input[type="radio"] {
-    margin-right: 5px;
-    vertical-align: middle;
-} 
+/* Remove specific label/input styling here - handle in child components */
+/* .controlGroup label { ... } */
+/* .controlGroup input[type="radio"] { ... } */ 

@@ -1,26 +1,48 @@
-.analysisTypeSelector { /* Wrapper */ }
+/* Styles for AnalysisTypeSelector - Analogous to ScopeSelector */
+
+.analysisTypeSelector {
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    background-color: transparent;
+}
 
 .title {
     margin-top: 0;
-    margin-bottom: 8px;
-    font-size: 1em;
-    color: #555;
+    margin-bottom: 12px;
+    font-size: 0.9em;
+    font-weight: 600;
+    color: #1e293b; /* Cool Gray 800 */
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
 }
 
 .options {
     display: flex;
-    flex-direction: column; /* Stack options vertically */
-    gap: 5px;
+    flex-direction: column; 
+    gap: 10px; 
 }
 
-.optionLabel {
-    display: flex;
-    align-items: center;
+.optionLabel { /* Renamed from .option in ScopeSelector CSS for consistency with TSX */
+    display: block; 
+    padding: 10px 12px; 
+    border-radius: 6px;
     cursor: pointer;
+    transition: background-color 0.2s, border-color 0.2s;
+    border: 1px solid #e2e8f0; /* Cool Gray 200 */
+    background-color: #fff;
+    color: #1e293b; /* Cool Gray 800 - Ensure label text itself is dark */
     font-size: 0.95em;
+    font-weight: 500;
 }
 
-.radioInput {
-    margin-right: 8px;
-    cursor: pointer;
+.optionLabel:hover {
+    background-color: #f8fafc; /* Cool Gray 50 */
+    border-color: #cbd5e1; /* Cool Gray 300 */
+}
+
+.radioInput { /* Renamed from input[type="radio"] in ScopeSelector CSS */
+    margin-right: 10px; 
+    vertical-align: middle;
+    accent-color: #3b82f6; /* Style radio button color */
 } 

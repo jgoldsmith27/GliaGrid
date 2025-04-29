@@ -1,14 +1,11 @@
 /* Standard padding and font for the whole page */
 .container {
-    /* padding: 24px; */ /* Remove horizontal padding */
-    padding-top: 24px;
-    padding-bottom: 24px;
+    padding: 24px 32px; /* Increase horizontal padding slightly */
     width: 100%; /* Ensure it takes full width */
-    /* max-width: 1400px; */ /* REMOVED: Allow edge-to-edge */
-    /* margin: 0 auto; */ /* REMOVED: Allow edge-to-edge */
+    box-sizing: border-box; /* Ensure padding is included in width */
 
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol"; /* Modern system font stack */
-    background-color: #f4f6f8; /* Lighter background - Will likely not be visible now */
+    background-color: #f8fafc; /* Slightly lighter grey (Cool Gray 50) */
     min-height: 100vh;
 }
 
@@ -24,49 +21,48 @@
     display: flex;
     flex-direction: row; /* Side-by-side by default */
     flex-wrap: wrap; /* Allow wrapping if needed, though stacking is preferred */
-    gap: 24px; /* Consistent gap */
+    gap: 32px; /* Increase gap slightly */
 }
 
 /* Common panel styling */
 .panel {
     background-color: #ffffff;
-    border: 1px solid #e5e7eb; /* Lighter border */
+    border: 1px solid #e2e8f0; /* Cool Gray 200 */
     border-radius: 8px; /* Slightly larger radius */
-    padding: 20px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.06); /* Softer shadow */
+    padding: 24px; /* Increase internal padding */
+    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); /* Subtle shadow */
 }
 
 .controlPanelContainer {
-    composes: panel; /* Inherit common panel styles */
-    /* flex: 0 0 320px; */ /* Removed fixed width */
-    flex-basis: 30%; /* Suggest a base width */
-    flex-grow: 0;    /* Don't grow */
-    flex-shrink: 0;  /* Don't shrink below basis unless needed */
-    max-width: 350px; /* Limit max width on larger screens */
-    min-width: 280px; /* Optional: Prevent becoming too narrow */
-    height: fit-content; /* Allow height to adjust */
+    composes: panel; 
+    flex-basis: 30%; /* Use a reasonable basis like 30% */
+    flex-grow: 0;    
+    flex-shrink: 0;  
+    max-width: 400px; 
+    height: fit-content; 
 }
 
 .displayPanelContainer {
-    composes: panel; /* Inherit common panel styles */
-    flex: 1; /* Takes remaining horizontal space */
-    min-width: 0; /* Prevents flex overflow */
-    /* Removed min-height, let content define it or handle in DisplayPanel */
+    composes: panel; 
+    flex: 1; /* Keep this taking remaining space */
+    min-width: 0; 
 }
 
 /* Responsive: Stack columns below 992px */
 @media (max-width: 991.98px) { 
     .resultsLayout {
-        flex-direction: column; /* Stack vertically */
+        flex-direction: column; 
     }
 
     .controlPanelContainer {
-        flex: 1 1 auto; /* Allow it to take full width */
-        max-width: 100%; /* Ensure it doesn't exceed container */
+        flex: 1 1 auto; 
+        max-width: 100%; /* Keep this for stacked view */
+        flex-basis: auto; /* Reset basis when stacked */
     }
 
     .displayPanelContainer {
-        flex: 1 1 auto; /* Allow it to take full width */
+        flex: 1 1 auto; 
+        flex-basis: auto; /* Reset basis when stacked */
     }
 }
 

@@ -8,47 +8,60 @@
 }
 
 .title {
-    margin: 0 0 20px 0;
-    color: #1f2937; /* Match ResultsPage title color */
+    margin: 0 0 12px 0; /* Reduced bottom margin */
+    color: #1e293b; /* Cool Gray 800 */
     font-size: 1.5em;
     font-weight: 600;
+    padding-bottom: 12px; /* Add padding */
+    border-bottom: 1px solid #e2e8f0; /* Add border */
 }
 
 .contextInfo {
-    margin: 0 0 20px 0;
-    color: #4b5563; /* Slightly darker grey */
-    font-size: 0.95em;
+    margin: 16px 0 24px 0; /* Adjust margins */
+    color: #475569; /* Cool Gray 600 */
+    font-size: 0.9em;
+    background-color: #f8fafc; /* Cool Gray 50 */
+    padding: 8px 12px;
+    border-radius: 6px;
+    border: 1px solid #e2e8f0; /* Cool Gray 200 */
+}
+.contextInfo strong {
+    color: #334155; /* Cool Gray 700 */
 }
 
 .contentArea {
-    margin-top: 20px;
+    margin-top: 24px;
 }
 
 .subTitle {
-    margin: 0 0 15px 0;
-    color: #374151;
-    font-size: 1.2em;
+    margin: 0 0 16px 0; /* Adjust margin */
+    color: #1e293b; /* Cool Gray 800 */
+    font-size: 1.15em; /* Slightly larger */
     font-weight: 600;
 }
 
 .noData, .placeholder {
     text-align: center;
-    padding: 24px;
-    color: #6b7280;
+    padding: 32px; /* More padding */
+    /* color: #64748b; */ /* Cool Gray 500 */
+    color: #334155; /* Cool Gray 700 */
+    font-size: 0.95em;
     font-style: italic;
-    background-color: #f9fafb; /* Light grey background */
-    border-radius: 6px;
-    margin-top: 16px;
+    background-color: #f8fafc; /* Cool Gray 50 */
+    border-radius: 8px;
+    border: 1px dashed #cbd5e1; /* Cool Gray 300 */
+    margin-top: 24px;
 }
 
 .error {
-    color: #dc2626;
-    padding: 12px;
-    background-color: #fee2e2;
+    color: #b91c1c; /* Red 700 */
+    padding: 12px 16px;
+    background-color: #fee2e2; /* Red 100 */
     border-radius: 6px;
     margin: 16px 0;
-    border: 1px solid #fca5a5;
+    border: 1px solid #fecaca; /* Red 200 */
     font-weight: 500;
+    font-size: 0.95em;
 }
 
 .loading {
@@ -87,27 +100,56 @@
 /* Layout for Table and Visualization */
 .tableAndVizLayout {
     display: flex;
-    flex-direction: row; /* Side-by-side by default */
-    gap: 24px;
+    flex-direction: row; 
+    gap: 32px; /* Match ResultsPage gap */
     align-items: flex-start;
 }
 
 .tableArea {
-    flex: 2; /* Table takes more space */
+    /* flex: 1; */ 
+    flex: 2; /* Give table area more space (e.g., 2/3) */
     min-width: 0;
     overflow-x: auto; /* Allow horizontal scroll if table too wide */
 }
 
+/* Ensure tables within the table area use full width */
+.tableArea > div > table, /* Direct child table */
+.tableArea > div > div > table, /* If wrapped in another div */
+.tableArea > div > .tableWrapper > table, /* If using a wrapper class */
+.tableArea table /* General fallback */
+{
+    width: 100%;
+    border-collapse: collapse; /* Common table style */
+}
+/* Update table styles slightly */
+.tableArea th,
+.tableArea td {
+    padding: 10px 14px; /* Adjust padding */
+    text-align: left;
+    border-bottom: 1px solid #e2e8f0; /* Cool Gray 200 */
+    font-size: 0.9em; /* Slightly smaller table text */
+}
+.tableArea th {
+    background-color: #f8fafc; /* Cool Gray 50 */
+    font-weight: 600;
+    color: #1e293b; /* Cool Gray 800 - Much darker */
+}
+.tableArea td {
+    color: #334155; /* Cool Gray 700 */
+}
+
+/* Refine Visualization Area */
 .visualizationArea {
-    flex: 1; /* Viz takes less space */
+    flex: 1; 
     position: sticky;
     top: 20px; 
-    max-height: calc(100vh - 120px); 
+    max-height: calc(100vh - 100px); 
     overflow-y: auto;
-    border: 1px solid #e5e7eb;
-    border-radius: 8px;
-    background-color: #ffffff;
-    padding: 16px;
+    border: none; /* Remove border - contained within panel */
+    border-radius: 0;
+    background-color: transparent; /* Remove bg - contained within panel */
+    padding: 0; /* Remove padding - handled by inner components */
+    min-height: 500px; 
 }
 
 /* Responsive: Stack below 992px (matching ResultsPage) */

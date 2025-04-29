@@ -203,7 +203,7 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
 
   return (
     <div className={styles.container}>
-      <h1 className={styles.pageTitle}>Analysis Results</h1>
+      {/* <h1 className={styles.pageTitle}>Analysis Results</h1> REMOVED */}
       
       <div className={styles.resultsLayout}>
           <div className={styles.controlPanelContainer}>

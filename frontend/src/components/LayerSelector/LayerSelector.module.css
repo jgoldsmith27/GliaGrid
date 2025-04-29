@@ -2,9 +2,13 @@
 
 .title {
     margin-top: 0;
-    margin-bottom: 8px;
-    font-size: 1em;
-    color: #555;
+    margin-bottom: 12px;
+    font-size: 0.9em;
+    font-weight: 600;
+    /* color: #475569; */ /* Cool Gray 600 */
+    color: #1e293b; /* Cool Gray 800 */
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
 }
 
 .optionsList {
@@ -30,8 +34,37 @@
     cursor: pointer;
 }
 
-.noLayers {
-    font-size: 0.9em;
-    color: #888;
+.selectElement {
+    width: 100%; 
+    padding: 10px 12px; /* Increase padding */
+    border: 1px solid #cbd5e1; /* Cool Gray 300 */
+    border-radius: 6px;
+    background-color: #fff;
+    font-size: 0.95em;
+    /* color: #334155; */ /* Cool Gray 700 */
+    color: #1e293b; /* Cool Gray 800 */
+    box-sizing: border-box; 
+    appearance: none; /* Remove default dropdown arrow */
+    background-image: url('data:image/svg+xml;charset=UTF-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="%2394a3b8"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>'); /* Custom arrow (Cool Gray 400) */
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    background-size: 1em 1em;
+}
+
+.selectElement:focus {
+    outline: none;
+    border-color: #3b82f6; 
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2); /* Adjusted focus shadow */
+}
+
+.noLayersMessage {
     font-style: italic;
+    /* color: #334155; */ /* Cool Gray 700 */
+    color: #1e293b; /* Cool Gray 800 */
+    font-size: 0.9em;
+    padding: 12px;
+    background-color: #f1f5f9; /* Cool Gray 100 */
+    border: 1px dashed #e2e8f0; /* Cool Gray 200 */
+    border-radius: 6px;
+    margin-top: 8px;
 } 
