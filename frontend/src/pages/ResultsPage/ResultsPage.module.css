@@ -1,45 +1,100 @@
-/* ResultsPage Layout */
+/* Standard padding and font for the whole page */
 .container {
-    padding: 20px;
-    font-family: sans-serif;
+    /* padding: 24px; */ /* Remove horizontal padding */
+    padding-top: 24px;
+    padding-bottom: 24px;
+    width: 100%; /* Ensure it takes full width */
+    /* max-width: 1400px; */ /* REMOVED: Allow edge-to-edge */
+    /* margin: 0 auto; */ /* REMOVED: Allow edge-to-edge */
+
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol"; /* Modern system font stack */
+    background-color: #f4f6f8; /* Lighter background - Will likely not be visible now */
+    min-height: 100vh;
 }
 
 .pageTitle {
-    margin-bottom: 20px;
-    color: #333;
+    margin: 0 0 24px 0; /* Adjusted margin */
+    color: #1f2937; /* Darker grey */
+    font-size: 1.8em; /* Slightly larger */
+    font-weight: 600;
 }
 
+/* Main layout using Flexbox */
 .resultsLayout {
     display: flex;
-    flex-direction: row; /* Default layout: controls on left, display on right */
-    gap: 20px; 
-    /* Adjust layout for smaller screens if needed later */
-    /* @media (max-width: 768px) { flex-direction: column; } */
+    flex-direction: row; /* Side-by-side by default */
+    flex-wrap: wrap; /* Allow wrapping if needed, though stacking is preferred */
+    gap: 24px; /* Consistent gap */
+}
+
+/* Common panel styling */
+.panel {
+    background-color: #ffffff;
+    border: 1px solid #e5e7eb; /* Lighter border */
+    border-radius: 8px; /* Slightly larger radius */
+    padding: 20px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.06); /* Softer shadow */
 }
 
 .controlPanelContainer {
-    flex: 0 0 300px; /* Fixed width for control panel */
-    border: 1px solid #ddd;
-    border-radius: 5px;
-    padding: 15px;
-    background-color: #f9f9f9;
-    height: fit-content; /* Adjust height based on content */
+    composes: panel; /* Inherit common panel styles */
+    /* flex: 0 0 320px; */ /* Removed fixed width */
+    flex-basis: 30%; /* Suggest a base width */
+    flex-grow: 0;    /* Don't grow */
+    flex-shrink: 0;  /* Don't shrink below basis unless needed */
+    max-width: 350px; /* Limit max width on larger screens */
+    min-width: 280px; /* Optional: Prevent becoming too narrow */
+    height: fit-content; /* Allow height to adjust */
 }
 
 .displayPanelContainer {
-    flex: 1; /* Display panel takes remaining space */
-    border: 1px solid #ddd;
-    border-radius: 5px;
-    padding: 15px;
-    min-height: 400px; /* Ensure it has some height */
+    composes: panel; /* Inherit common panel styles */
+    flex: 1; /* Takes remaining horizontal space */
+    min-width: 0; /* Prevents flex overflow */
+    /* Removed min-height, let content define it or handle in DisplayPanel */
 }
 
-/* Basic Loading/Error States */
+/* Responsive: Stack columns below 992px */
+@media (max-width: 991.98px) { 
+    .resultsLayout {
+        flex-direction: column; /* Stack vertically */
+    }
+
+    .controlPanelContainer {
+        flex: 1 1 auto; /* Allow it to take full width */
+        max-width: 100%; /* Ensure it doesn't exceed container */
+    }
+
+    .displayPanelContainer {
+        flex: 1 1 auto; /* Allow it to take full width */
+    }
+}
+
+/* Basic Loading/Error States - Keep as is or enhance later */
 .errorMessage {
-    color: red;
-    font-weight: bold;
+    color: #dc2626; /* Tailwind Red */
+    font-weight: 500;
+    background-color: #fee2e2;
+    padding: 10px;
+    border-radius: 6px;
+    border: 1px solid #fca5a5;
 }
 
 progress {
     width: 100%;
+    height: 8px;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+progress::-webkit-progress-bar {
+    background-color: #e5e7eb;
+}
+
+progress::-webkit-progress-value {
+    background-color: #3b82f6; /* Tailwind Blue */
+}
+
+progress::-moz-progress-bar {
+    background-color: #3b82f6;
 } 

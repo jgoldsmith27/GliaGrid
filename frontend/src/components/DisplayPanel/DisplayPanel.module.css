@@ -1,19 +1,23 @@
+/* Inherit panel styles indirectly via parent in ResultsPage */
 .displayPanel {
-    padding: 20px;
-    background-color: #fff;
-    border-radius: 8px;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    /* Remove redundant padding/bg/border/shadow - handled by displayPanelContainer */
+    /* padding: 20px; */
+    /* background-color: #fff; */
+    /* border-radius: 8px; */
+    /* box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); */
 }
 
 .title {
     margin: 0 0 20px 0;
-    color: #333;
+    color: #1f2937; /* Match ResultsPage title color */
     font-size: 1.5em;
+    font-weight: 600;
 }
 
 .contextInfo {
     margin: 0 0 20px 0;
-    color: #666;
+    color: #4b5563; /* Slightly darker grey */
+    font-size: 0.95em;
 }
 
 .contentArea {
@@ -22,100 +26,127 @@
 
 .subTitle {
     margin: 0 0 15px 0;
-    color: #444;
+    color: #374151;
     font-size: 1.2em;
+    font-weight: 600;
 }
 
-.noData {
+.noData, .placeholder {
     text-align: center;
-    padding: 20px;
-    color: #666;
+    padding: 24px;
+    color: #6b7280;
     font-style: italic;
+    background-color: #f9fafb; /* Light grey background */
+    border-radius: 6px;
+    margin-top: 16px;
 }
 
 .error {
-    color: #d32f2f;
-    padding: 10px;
-    background-color: #ffebee;
-    border-radius: 4px;
-    margin: 10px 0;
+    color: #dc2626;
+    padding: 12px;
+    background-color: #fee2e2;
+    border-radius: 6px;
+    margin: 16px 0;
+    border: 1px solid #fca5a5;
+    font-weight: 500;
 }
 
 .loading {
-    /* text-align: center; */ /* Let container handle centering */
-    padding: 0; /* Remove padding if handled by container */
-    margin: 0 10px 0 0; /* Add some margin to the right of the text */
-    color: #666;
+    padding: 0;
+    margin: 0 10px 0 0;
+    color: #4b5563;
     font-style: italic;
 }
 
-/* Container for loading text and cancel button */
 .loadingContainer {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 10px; /* Add padding here instead of on .loading */
+    padding: 16px;
+    min-height: 80px; /* Give it some min height */
 }
 
-/* Cancel Button Styling */
 .cancelButton {
-    margin-left: 10px; /* Space between text and button */
-    padding: 3px 8px;
-    font-size: 0.8em;
-    color: #d32f2f; /* Red color */
-    background-color: #ffebee;
-    border: 1px solid #ffcdd2;
-    border-radius: 4px;
+    margin-left: 10px;
+    padding: 4px 10px;
+    font-size: 0.85em;
+    color: #dc2626; 
+    background-color: #fee2e2;
+    border: 1px solid #fca5a5;
+    border-radius: 6px;
     cursor: pointer;
     transition: background-color 0.2s, border-color 0.2s;
+    font-weight: 500;
 }
 
 .cancelButton:hover {
-    background-color: #ffcdd2;
-    border-color: #ef9a9a;
+    background-color: #fecaca;
+    border-color: #f87171;
 }
 
-/* New Layout Styles */
+/* Layout for Table and Visualization */
 .tableAndVizLayout {
     display: flex;
-    gap: 20px; /* Space between table and viz */
-    align-items: flex-start; /* Align items to the top */
+    flex-direction: row; /* Side-by-side by default */
+    gap: 24px;
+    align-items: flex-start;
 }
 
 .tableArea {
-    flex: 1; /* Allow table area to grow */
-    min-width: 0; /* Prevent flex item from overflowing */
+    flex: 2; /* Table takes more space */
+    min-width: 0;
+    overflow-x: auto; /* Allow horizontal scroll if table too wide */
 }
 
 .visualizationArea {
-    width: 400px; /* Keep fixed width */
+    flex: 1; /* Viz takes less space */
     position: sticky;
     top: 20px; 
-    /* Remove fixed height - let content determine height */
-    /* height: calc(100vh - 40px); */ 
-    max-height: calc(100vh - 40px); /* Optionally constrain max height */
-    overflow-y: auto; /* Allow scrolling if content exceeds max-height or viewport */
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    background: white;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-    padding: 15px; /* Add some internal padding */
+    max-height: calc(100vh - 120px); 
+    overflow-y: auto;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background-color: #ffffff;
+    padding: 16px;
+}
+
+/* Responsive: Stack below 992px (matching ResultsPage) */
+@media (max-width: 991.98px) {
+    .tableAndVizLayout {
+        flex-direction: column; /* Stack vertically */
+    }
+
+    .tableArea {
+        flex: 1 1 auto; /* Take full width */
+        order: 1; /* Show table first */
+    }
+
+    .visualizationArea {
+        flex: 1 1 auto; /* Take full width */
+        order: 2; /* Show viz second */
+        width: 100%; /* Ensure full width */
+        position: static; /* Remove sticky positioning */
+        max-height: none; /* Remove max-height */
+        overflow-y: visible; /* Remove internal scroll */
+        min-width: unset; /* Remove min-width */
+        margin-top: 24px; /* Add space when stacked */
+    }
 }
 
 /* Warning Messages Styling */
 .warningsContainer {
-    background-color: #fffbe6; /* Light yellow background */
-    border: 1px solid #ffe58f; /* Yellow border */
-    color: #d46b08; /* Dark yellow/orange text */
-    padding: 10px 15px;
-    border-radius: 4px;
-    margin-bottom: 15px;
+    background-color: #fefce8; /* Lighter yellow */
+    border: 1px solid #fef08a;
+    color: #a16207;
+    padding: 12px 16px;
+    border-radius: 6px;
+    margin-bottom: 16px;
     font-size: 0.9em;
 }
 
 .warningsContainer h4 {
     margin-top: 0;
-    margin-bottom: 5px;
+    margin-bottom: 6px;
     font-weight: 600;
 }
 
@@ -125,7 +156,7 @@
 }
 
 .warningsContainer li {
-    margin-bottom: 3px;
+    margin-bottom: 4px;
 }
 
 /* --- REMOVE OLD/REDUNDANT TABLE STYLES --- */
