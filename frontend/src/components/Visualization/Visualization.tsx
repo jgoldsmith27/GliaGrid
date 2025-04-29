@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { ScatterplotLayer } from '@deck.gl/layers';
 import DeckGL from '@deck.gl/react';
-import { OrthographicView } from '@deck.gl/core';
+import { OrthographicView, OrthographicViewState, ViewStateChangeParameters } from '@deck.gl/core';
 import styles from './Visualization.module.css';
 
 interface Point {
@@ -48,7 +48,7 @@ const getInitialViewState = (ligandData: Point[], receptorData: Point[]) => {
     return {
         target: [centerX, centerY, 0] as [number, number, number], // Center the view, cast type explicitly
         zoom: zoom, 
-        minZoom: -2, // Allow zooming out further
+        minZoom: -10, // Allow zooming out much further
         maxZoom: 10 // Adjust as needed
     };
 };
@@ -63,6 +63,42 @@ const Visualization: React.FC<VisualizationProps> = ({ data, ligandName, recepto
       console.log("[Visualization] Calculated initialViewState:", state);
       return state;
   }, [data]); // Recalculate only when data changes
+
+  // --- Add State and Handlers for Zoom --- 
+  const [viewState, setViewState] = useState<OrthographicViewState>(initialViewState as OrthographicViewState);
+
+  // Update viewState when initialViewState changes (e.g., data updates)
+  // This ensures view resets if data prop changes
+  useEffect(() => {
+    setViewState(initialViewState as OrthographicViewState);
+  }, [initialViewState]);
+
+  const onViewStateChange = useCallback(({ viewState }: ViewStateChangeParameters<OrthographicViewState>) => {
+    setViewState(viewState);
+  }, []);
+
+  const handleZoom = useCallback((zoomIncrement: number) => {
+    setViewState((currentViewState) => {
+        const currentZoom = currentViewState.zoom ?? 0; 
+        let nextZoom: number | [number, number];
+
+        // Handle different zoom formats (number or array - though Orthographic usually uses number)
+        if (typeof currentZoom === 'number') {
+            nextZoom = currentZoom + zoomIncrement;
+        } else if (Array.isArray(currentZoom) && currentZoom.length === 2) {
+            nextZoom = [currentZoom[0] + zoomIncrement, currentZoom[1] + zoomIncrement];
+        } else {
+            console.warn("Unexpected zoom format in viewState:", currentZoom);
+            nextZoom = 0 + zoomIncrement; 
+        }
+        
+        return {
+            ...currentViewState,
+            zoom: nextZoom
+        };
+    });
+  }, []); // Empty dependency array as it only uses setViewState
+  // --- End Zoom Logic --- 
 
   const layers = [
     new ScatterplotLayer<Point>({
@@ -97,30 +133,40 @@ const Visualization: React.FC<VisualizationProps> = ({ data, ligandName, recepto
 
   return (
     <div className={`${styles.visualizationContainer} ${isFullscreen ? styles.fullscreen : ''}`}>
-      <div className={styles.controls}>
-        <button 
-          className={styles.fullscreenButton}
-          onClick={toggleFullscreen}
-          title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
-        >
-          {isFullscreen ? "✕" : "⛶"}
-        </button>
-      </div>
-      <DeckGL
-        views={new OrthographicView({id: 'ortho-view'})}
-        initialViewState={initialViewState}
-        controller={true}
-        layers={layers}
-        getTooltip={({object}) => object && `Point: (${object.x.toFixed(2)}, ${object.y.toFixed(2)})`}
-      />
-      <div className={styles.legend}>
-        <div className={styles.legendItem}>
-          <div className={styles.legendColor} style={{ backgroundColor: 'red' }} />
-          <span>{ligandName}</span>
-        </div>
-        <div className={styles.legendItem}>
-          <div className={styles.legendColor} style={{ backgroundColor: 'blue' }} />
-          <span>{receptorName}</span>
+      <div className={styles.deckGlWrapper}>
+        <DeckGL
+          views={new OrthographicView({id: 'ortho-view'})}
+          viewState={viewState}
+          onViewStateChange={onViewStateChange}
+          controller={true}
+          layers={layers}
+          getTooltip={({object}) => object && `Point: (${object.x.toFixed(2)}, ${object.y.toFixed(2)})`}
+          style={{ width: '100%', height: '100%', position: 'relative' }}
+        />
+        <div className={styles.deckOverlayControls}>
+            <div className={styles.deckButtons}>
+                <div className={styles.zoomControls}>
+                    <button onClick={() => handleZoom(1)} title="Zoom In">+</button>
+                    <button onClick={() => handleZoom(-1)} title="Zoom Out">-</button>
+                </div>
+                <button 
+                    className={styles.fullscreenButton}
+                    onClick={toggleFullscreen}
+                    title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+                >
+                    {isFullscreen ? "✕" : "⛶"}
+                </button>
+            </div>
+            <div className={styles.legend}>
+                <div className={styles.legendItem}>
+                    <div className={styles.legendColor} style={{ backgroundColor: 'red' }} />
+                    <span>{ligandName}</span>
+                </div>
+                <div className={styles.legendItem}>
+                    <div className={styles.legendColor} style={{ backgroundColor: 'blue' }} />
+                    <span>{receptorName}</span>
+                </div>
+            </div>
         </div>
       </div>
     </div>
