@@ -62,6 +62,8 @@ const Visualization: React.FC<VisualizationProps> = ({ data, ligandName, recepto
   const [isFullscreen, setIsFullscreen] = useState(false);
   // --- Add State for Heatmap Type ---
   const [heatmapType, setHeatmapType] = useState<HeatmapType>('None'); 
+  // --- Add State for Scatter Plot Visibility ---
+  const [showScatterPlot, setShowScatterPlot] = useState(true);
 
   // Calculate initial view state memoized based on data
   const initialViewState = useMemo(() => {
@@ -178,13 +180,30 @@ const Visualization: React.FC<VisualizationProps> = ({ data, ligandName, recepto
       });
     }
 
-    const finalLayers = typedAggregationLayer ? [typedAggregationLayer, ...baseLayers] : baseLayers;
+    // Conditionally include base layers based on showScatterPlot state
+    const layersToShow = [];
+    if (typedAggregationLayer) {
+      layersToShow.push(typedAggregationLayer);
+    }
+    if (showScatterPlot) {
+      layersToShow.push(...baseLayers);
+    } else if (!typedAggregationLayer) {
+        // If heatmap is off AND showScatterPlot is false, still show base layers? 
+        // Or maybe just show nothing? Let's show baseLayers for now if heatmap is off.
+        // This case might need refinement based on desired behavior when heatmap is None and toggle is off.
+        // For now, if heatmap is None, always show base layers regardless of toggle.
+       if (heatmapType === 'None') {
+           layersToShow.push(...baseLayers);
+       } 
+    }
+    
+    const finalLayers = layersToShow;
     console.log('[Visualization Layers] Final layers array:', finalLayers.map(l => l?.id)); // Log layer IDs
 
     // Add aggregation layer *before* scatterplots so it's underneath
     return finalLayers;
 
-  }, [data.ligand, data.receptor, heatmapType]); // Dependencies for useMemo
+  }, [data.ligand, data.receptor, heatmapType, showScatterPlot]); // Dependencies for useMemo
 
   const toggleFullscreen = () => {
     setIsFullscreen(!isFullscreen);
@@ -247,6 +266,17 @@ const Visualization: React.FC<VisualizationProps> = ({ data, ligandName, recepto
                     <label>
                         <input type="radio" name="heatmapType" value="Receptor" checked={heatmapType === 'Receptor'} onChange={() => setHeatmapType('Receptor')} disabled={data.receptor.length === 0} />
                         Receptor Density
+                    </label>
+                </div>
+                {/* --- Add Scatter Plot Toggle --- */}
+                <div className={styles.scatterToggle}>
+                    <label>
+                        <input 
+                            type="checkbox" 
+                            checked={showScatterPlot} 
+                            onChange={(e) => setShowScatterPlot(e.target.checked)} 
+                        />
+                        Show Points
                     </label>
                 </div>
             </div>
