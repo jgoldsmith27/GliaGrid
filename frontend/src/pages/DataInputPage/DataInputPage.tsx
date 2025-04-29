@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import path from 'path'; // Keep for path.basename
 import styles from './DataInputPage.module.css';
 import FileUploader from '../../components/FileUploader/FileUploader';
 import ColumnMapper from '../../components/ColumnMapper/ColumnMapper';
@@ -315,7 +314,74 @@ const DataInputPage: React.FC = () => {
     setAnalysisStatus('Please enter a name for the project configuration.');
   };
 
-  // --- New handler: Saves config and starts backend job --- 
+  // --- NEW: Function to start the backend analysis job ---
+  const startAnalysisJob = async (
+      spatialFileId: string,
+      spatialMappingData: AnalysisMapping,
+      interactionsFileId: string,
+      interactionsMappingData: AnalysisMapping,
+      modulesFileId: string,
+      modulesMappingData: AnalysisMapping
+  ): Promise<{ success: boolean; error?: string }> => {
+      
+      setAnalysisStatus('Starting analysis job...');
+      // Ensure mappings are at least empty objects if null/undefined passed
+      const safeSpatialMapping = spatialMappingData || {};
+      const safeInteractionsMapping = interactionsMappingData || {};
+      const safeModulesMapping = modulesMappingData || {};
+      
+      const payload: AnalysisPayload = {
+          spatialFileId: spatialFileId,
+          spatialMapping: safeSpatialMapping,
+          interactionsFileId: interactionsFileId,
+          interactionsMapping: safeInteractionsMapping,
+          modulesFileId: modulesFileId,
+          modulesMapping: safeModulesMapping
+      };
+
+      console.log("[DataInputPage] Sending analysis payload:", JSON.stringify(payload));
+
+      try {
+          const response = await fetch('http://localhost:8000/api/analysis/start', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+          });
+
+          console.log("[DataInputPage] Raw analysis start response status:", response.status);
+          const responseText = await response.text(); 
+          console.log("[DataInputPage] Raw analysis start response body:", responseText);
+
+          if (!response.ok) {
+              let errorDetail = `Server error: ${response.status} ${response.statusText}`;
+              try { errorDetail = JSON.parse(responseText).detail || errorDetail; } catch {} 
+              throw new Error(errorDetail);
+          }
+
+          const result = JSON.parse(responseText); 
+          console.log("[DataInputPage] Parsed analysis start result:", result);
+
+          if (!result.job_id) {
+              throw new Error("Backend started analysis but did not return a job_id.");
+          }
+
+          setAnalysisStatus(`Analysis job started successfully! Job ID: ${result.job_id}`);
+          setLastJobId(result.job_id);
+          console.log("[DataInputPage] Navigating to results page for job:", result.job_id);
+          navigate(`/analysis/${result.job_id}`);
+          return { success: true }; // Analysis started successfully
+
+      } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          console.error("[DataInputPage] Error during analysis start:", errorMessage);
+          setAnalysisStatus(`Error starting analysis: ${errorMessage}`);
+          setIsAnalyzing(false); // Allow user to try again or modify
+          return { success: false, error: errorMessage };
+      }
+      // Note: setIsAnalyzing(false) is handled within the error case or implicitly on navigation
+  };
+
+  // --- Modified handler: Saves config and starts backend job --- 
   const handleSaveAndStart = async () => {
     if (!projectName || projectName.trim().length === 0) {
       setAnalysisStatus('Project name cannot be empty.');
@@ -323,18 +389,17 @@ const DataInputPage: React.FC = () => {
     }
 
     setShowProjectNameInput(false);
-    setIsAnalyzing(true);
+    setIsAnalyzing(true); // Set analyzing state here
     setAnalysisStatus('Saving project configuration...');
     setLastJobId(null);
 
-    // Prepare Project Data
+    // Prepare Project Data for saving (using current component state)
     const currentFileIds = { 
       expression: spatialFile.fileId ?? undefined,
       metadata: interactionsFile.fileId ?? undefined,
       modules: modulesFile.fileId ?? undefined
     }; 
     
-    // Create mappings object, only including defined values
     const currentMappings: ColumnMappings = {};
     if (spatialFile.fileId) {
         currentMappings.expression = {};
@@ -342,41 +407,31 @@ const DataInputPage: React.FC = () => {
         if (spatialFile.xCol) currentMappings.expression.xCol = spatialFile.xCol;
         if (spatialFile.yCol) currentMappings.expression.yCol = spatialFile.yCol;
         if (spatialFile.layerCol) currentMappings.expression.layerCol = spatialFile.layerCol;
-        // Clean up empty object if no mappings were set
-        if (Object.keys(currentMappings.expression).length === 0) {
-            delete currentMappings.expression;
-        }
+        if (Object.keys(currentMappings.expression).length === 0) delete currentMappings.expression;
     }
     if (interactionsFile.fileId) {
         currentMappings.metadata = {};
         if (interactionsFile.ligandCol) currentMappings.metadata.ligandCol = interactionsFile.ligandCol;
         if (interactionsFile.receptorCol) currentMappings.metadata.receptorCol = interactionsFile.receptorCol;
-        if (Object.keys(currentMappings.metadata).length === 0) {
-            delete currentMappings.metadata;
-        }
+        if (Object.keys(currentMappings.metadata).length === 0) delete currentMappings.metadata;
     }
     if (modulesFile.fileId) {
         currentMappings.modules = {};
         if (modulesFile.geneCol) currentMappings.modules.geneCol = modulesFile.geneCol;
         if (modulesFile.moduleCol) currentMappings.modules.moduleCol = modulesFile.moduleCol;
-        if (Object.keys(currentMappings.modules).length === 0) {
-            delete currentMappings.modules;
-        }
+        if (Object.keys(currentMappings.modules).length === 0) delete currentMappings.modules;
     }
 
     const projectData = { version: "1.0", files: currentFileIds, mappings: currentMappings };
 
-    let savedProjectInfo: ProjectListing | null = null;
-    let analysisStarted = false;
-
     try {
-        // Save Project Config
+        // 1. Save Project Config
         console.log("[DataInputPage] Attempting to save project config...");
         const saveResult = await window.electronAPI.saveProject(projectName.trim(), projectData);
         if (!saveResult.success || !saveResult.filePath) {
             throw new Error(saveResult.error || 'Failed to save project configuration.');
         }
-        savedProjectInfo = { 
+        const savedProjectInfo = { 
             filePath: saveResult.filePath, 
             name: saveResult.name!, 
             savedAt: saveResult.savedAt! 
@@ -384,10 +439,9 @@ const DataInputPage: React.FC = () => {
         setSavedProjects(prev => [savedProjectInfo!, ...prev.filter(p => p.filePath !== savedProjectInfo!.filePath)]);
         if (projectListStatus.includes('No saved projects')) setProjectListStatus('');
         console.log('[DataInputPage] Project configuration saved:', savedProjectInfo);
-
-        // Start Backend Analysis Job
         setAnalysisStatus('Configuration saved. Starting analysis job...');
-        // Create payload, ensuring potentially undefined mappings are handled
+
+        // 2. Start Backend Analysis Job (using current state)
         const spatialMapping: AnalysisMapping = {};
         if (spatialFile.geneCol) spatialMapping.geneCol = spatialFile.geneCol;
         if (spatialFile.xCol) spatialMapping.xCol = spatialFile.xCol;
@@ -402,118 +456,117 @@ const DataInputPage: React.FC = () => {
         if (modulesFile.geneCol) modulesMapping.geneCol = modulesFile.geneCol;
         if (modulesFile.moduleCol) modulesMapping.moduleCol = modulesFile.moduleCol;
 
-        const payload: AnalysisPayload = {
-            spatialFileId: spatialFile.fileId!,
-            spatialMapping: spatialMapping, // Use the constructed mapping
-            interactionsFileId: interactionsFile.fileId!,
-            interactionsMapping: interactionsMapping, // Use the constructed mapping
-            modulesFileId: modulesFile.fileId!,
-            modulesMapping: modulesMapping // Use the constructed mapping
-        };
-        
-        // Removed redundant cleanup logic as undefined values are no longer added
-        console.log("[DataInputPage] Sending analysis payload:", JSON.stringify(payload));
+        // Call the extracted function
+        const analysisResult = await startAnalysisJob(
+            spatialFile.fileId!, 
+            spatialMapping, 
+            interactionsFile.fileId!, 
+            interactionsMapping, 
+            modulesFile.fileId!, 
+            modulesMapping
+        );
 
-        const response = await fetch('http://localhost:8000/api/analysis/start', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-        });
-
-        console.log("[DataInputPage] Raw analysis start response status:", response.status);
-        const responseText = await response.text(); // Read body once
-        console.log("[DataInputPage] Raw analysis start response body:", responseText);
-
-        if (!response.ok) {
-             let errorDetail = `Server error: ${response.status} ${response.statusText}`;
-             try { errorDetail = JSON.parse(responseText).detail || errorDetail; } catch {} // Try parsing error from body
-             throw new Error(errorDetail);
+        if (!analysisResult.success) {
+             // Error message is already set by startAnalysisJob
+             // isAnalyzing state is already set to false by startAnalysisJob
+             console.error("[DataInputPage] Analysis job failed to start after saving project.");
+             // No need to throw again, just let the function finish
         }
-
-        const result = JSON.parse(responseText); // Parse the body we already read
-        console.log("[DataInputPage] Parsed analysis start result:", result);
-
-        if (!result.job_id) {
-            throw new Error("Backend started analysis but did not return a job_id.");
-        }
-
-        analysisStarted = true; // Mark as successful
-        setAnalysisStatus(`Analysis job started successfully! Job ID: ${result.job_id}`);
-        setLastJobId(result.job_id);
-        console.log("[DataInputPage] Navigating to results page for job:", result.job_id);
-        navigate(`/analysis/${result.job_id}`);
+        // If analysisResult.success is true, navigation happens in startAnalysisJob
 
     } catch (error) {
+        // This catch block handles errors from saveProject OR any synchronous errors before/between awaits
         const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error("[DataInputPage] Error during project save or analysis start:", errorMessage);
+        console.error("[DataInputPage] Error during project save or analysis initiation:", errorMessage);
         setAnalysisStatus(`Error: ${errorMessage}`);
-    } finally {
-        if (!analysisStarted) {
-            setIsAnalyzing(false);
-        }
-    }
+        setIsAnalyzing(false); // Ensure analyzing state is reset on any error in this process
+    } 
   };
 
-  // --- Simplified handleLoadProjectUI ---
-  const handleLoadProjectUI = async (projectFilePath: string) => {
-    console.log('Attempting to load project configuration:', projectFilePath);
-    setProjectListStatus(`Loading project: ${path.basename(projectFilePath)}...`);
-    setIsAnalyzing(false); 
+  // --- Modified handleLoadProjectUI --- (Added explicit return type void for clarity)
+  const handleLoadProjectUI = async (projectFilePath: string, projectName: string): Promise<void> => { 
+    console.log('Attempting to load project configuration and start analysis:', projectFilePath);
+    setProjectListStatus(`Loading project: ${projectName}...`);
+    setIsAnalyzing(true); 
     setAnalysisStatus(''); 
+    setLastJobId(null);
 
     try {
+        // 1. Load Project Config
         const result = await window.electronAPI.loadProject(projectFilePath);
         const loadResult = result as { success: boolean; error?: string; projectState?: SavedProjectData };
 
-        if (loadResult.success && loadResult.projectState) {
-            const loadedData = loadResult.projectState;
-            console.log("Loaded project data:", loadedData);
-
-            let newSpatial = createInitialFileState();
-            let newInteractions = createInitialFileState();
-            let newModules = createInitialFileState();
-
-            // Restore Mappings (uses local ColumnMappings type)
-            newSpatial = { ...newSpatial, ...(loadedData.mappings?.expression || {}) };
-            newInteractions = { ...newInteractions, ...(loadedData.mappings?.metadata || {}) };
-            newModules = { ...newModules, ...(loadedData.mappings?.modules || {}) };
-
-            newSpatial.fileId = loadedData.files.expression ?? null;
-            newInteractions.fileId = loadedData.files.metadata ?? null;
-            newModules.fileId = loadedData.files.modules ?? null;
-
-            const updateStateWithPlaceholder = (state: FileState, fileId: string | null | undefined): FileState => {
-                if (!fileId) return createInitialFileState();
-                return {
-                    ...state, 
-                    file: { name: `[Loaded: ${fileId.substring(0, 8)}...]` } as File,
-                    headers: [],
-                    previewRows: [],
-                    fileInfo: undefined,
-                    error: null,
-                    isLoading: false,
-                };
-            };
-            newSpatial = updateStateWithPlaceholder(newSpatial, newSpatial.fileId);
-            newInteractions = updateStateWithPlaceholder(newInteractions, newInteractions.fileId);
-            newModules = updateStateWithPlaceholder(newModules, newModules.fileId);
-
-            setSpatialFile(newSpatial);
-            setInteractionsFile(newInteractions);
-            setModulesFile(newModules);
-            
-            setProjectListStatus(''); 
-            setAnalysisStatus(`Project '${loadedData.projectName}' loaded. Review mappings and click 'Save & Start Analysis' to run.`);
-            setShowProjectNameInput(false); 
-            console.log("[DataInputPage] State updated after load.");
-
-        } else {
-            setProjectListStatus(`Error loading project: ${loadResult.error || 'Unknown error'}`);
-            console.error("Load Error:", loadResult.error);
+        if (!loadResult.success || !loadResult.projectState) {
+             throw new Error(loadResult.error || 'Unknown error loading project file.');
         }
+        
+        const loadedData = loadResult.projectState;
+        console.log("Loaded project data:", loadedData);
+
+        // --- Check and assign file IDs --- 
+        const spatialFileId = loadedData.files.expression;
+        const interactionsFileId = loadedData.files.metadata;
+        const modulesFileId = loadedData.files.modules;
+
+        // Check non-null/undefined after assignment
+        if (!spatialFileId || !interactionsFileId || !modulesFileId) {
+             throw new Error('Loaded project is missing one or more essential file references. Cannot start analysis.');
+        }
+        // TypeScript should now know these are strings
+
+        // --- 2. Update the UI state --- 
+        let newSpatial = createInitialFileState();
+        let newInteractions = createInitialFileState();
+        let newModules = createInitialFileState();
+        // Assign checked IDs
+        newSpatial.fileId = spatialFileId;
+        newInteractions.fileId = interactionsFileId;
+        newModules.fileId = modulesFileId;
+        // Restore Mappings
+        newSpatial = { ...newSpatial, ...(loadedData.mappings?.expression || {}) };
+        newInteractions = { ...newInteractions, ...(loadedData.mappings?.metadata || {}) };
+        newModules = { ...newModules, ...(loadedData.mappings?.modules || {}) };
+        
+        const updateStateWithPlaceholder = (state: FileState, fileId: string): FileState => ({ 
+            ...state, 
+            file: { name: `[Loaded: ${fileId.substring(0, 8)}...]` } as File,
+            headers: [], previewRows: [], fileInfo: undefined, error: null, isLoading: false,
+        });
+        // Use the already checked variables here too for consistency
+        setSpatialFile(updateStateWithPlaceholder(newSpatial, spatialFileId));
+        setInteractionsFile(updateStateWithPlaceholder(newInteractions, interactionsFileId));
+        setModulesFile(updateStateWithPlaceholder(newModules, modulesFileId));
+        
+        setProjectListStatus(''); 
+        setAnalysisStatus(`Project '${loadedData.projectName}' loaded. Starting analysis...`);
+        setShowProjectNameInput(false); 
+        console.log("[DataInputPage] State updated after load. Attempting to start analysis job automatically.");
+
+        // --- 3. Attempt to start the analysis job --- (Use checked variables)
+        const analysisResult = await startAnalysisJob(
+             spatialFileId,
+             loadedData.mappings?.expression || {},
+             interactionsFileId,
+             loadedData.mappings?.metadata || {},
+             modulesFileId,
+             loadedData.mappings?.modules || {}
+        );
+
+        // Check result from startAnalysisJob
+        if (!analysisResult.success) {
+            // Error message is already set by startAnalysisJob
+            // isAnalyzing state is already set to false by startAnalysisJob
+            console.error(`[DataInputPage] Failed to auto-start analysis for loaded project '${projectName}'.`);
+        }
+         // Success case handled by startAnalysisJob
+
     } catch (error) {
-        setProjectListStatus(`Error loading project: ${error instanceof Error ? error.message : String(error)}`);
-        console.error("Load IPC Error:", error);
+        // This catch handles errors from loadProject OR the file ID checks OR synchronous errors
+        const msg = error instanceof Error ? error.message : String(error);
+        setProjectListStatus(''); 
+        setAnalysisStatus(`Error loading project: ${msg}`); 
+        console.error("Load Project / Auto-Analysis Error:", error);
+        setIsAnalyzing(false); 
     }
   };
 
@@ -581,7 +634,7 @@ const DataInputPage: React.FC = () => {
                   <td>{formatProjectDate(proj.savedAt)}</td>
                   <td className={styles.projectActions}> {/* Add CSS */} 
                     <button
-                      onClick={() => handleLoadProjectUI(proj.filePath)}
+                      onClick={() => handleLoadProjectUI(proj.filePath, proj.name)}
                       className={styles.projectActionButton} /* Add CSS */ 
                       disabled={isAnalyzing} 
                       title="Load this project configuration"
