@@ -1,19 +1,63 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import path from 'path'; // Keep for path.basename
 import styles from './DataInputPage.module.css';
 import FileUploader from '../../components/FileUploader/FileUploader';
 import ColumnMapper from '../../components/ColumnMapper/ColumnMapper';
 import DataPreview from '../../components/DataPreview/DataPreview';
-import { FileState, FileType, FilePreviewResult, requiredColumns, mappingFields, AnalysisPayload } from '../../types/dataTypes';
+import { FileState, FileType, FilePreviewResult, requiredColumns, mappingFields, AnalysisPayload, AnalysisMapping } from '../../types/dataTypes';
+
+// --- Define Interfaces Locally ---
+interface ColumnMappings { 
+  expression?: { 
+    geneCol?: string;
+    xCol?: string;
+    yCol?: string;
+    layerCol?: string;
+  };
+  metadata?: {
+    ligandCol?: string;
+    receptorCol?: string;
+  };
+  modules?: {
+    geneCol?: string;
+    moduleCol?: string;
+  };
+}
+
+interface SavedProjectData { 
+    projectName: string;
+    savedAt: string; 
+    version: string;
+    files: { 
+      expression?: string; 
+      metadata?: string;   
+      modules?: string;    
+    };
+    mappings: ColumnMappings; // Use the locally defined type
+}
+
+interface ProjectListing { 
+    filePath: string;
+    name: string;
+    savedAt: string; 
+}
+// --- End Local Interface Definitions ---
 
 // Augment the window interface to tell TypeScript about electronAPI
 declare global {
   interface Window {
     electronAPI: {
       readFilePreview: (fileContent: string, fileName: string) => Promise<FilePreviewResult>;
+      listProjects: () => Promise<{ success: boolean; error?: string; projects?: ProjectListing[] }>;
+      saveProject: (projectName: string, projectData: { version: string; files: { expression?: string; metadata?: string; modules?: string }; mappings: ColumnMappings }) => Promise<{ success: boolean; filePath?: string; name?: string; savedAt?: string; error?: string }>;
+      loadProject: (filePath: string) => Promise<{ success: boolean; error?: string; projectState?: SavedProjectData }>;
+      deleteProject: (filePath: string, projectName: string) => Promise<{ success: boolean; error?: string; filePath?: string }>;
     }
   }
 }
+
+const projectFileExtension = '.gliaproj';
 
 const DataInputPage: React.FC = () => {
   const navigate = useNavigate();
@@ -33,9 +77,39 @@ const DataInputPage: React.FC = () => {
   const [spatialFile, setSpatialFile] = useState<FileState>(createInitialFileState());
   const [interactionsFile, setInteractionsFile] = useState<FileState>(createInitialFileState());
   const [modulesFile, setModulesFile] = useState<FileState>(createInitialFileState());
-  const [analysisStatus, setAnalysisStatus] = useState<string>(''); // To display analysis status/errors
-  const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false); // Loading state for analysis
-  const [lastJobId, setLastJobId] = useState<string | null>(null); // Store the ID of the last started job
+  const [analysisStatus, setAnalysisStatus] = useState<string>('');
+  const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+  const [lastJobId, setLastJobId] = useState<string | null>(null);
+  const [savedProjects, setSavedProjects] = useState<ProjectListing[]>([]); 
+  const [projectListStatus, setProjectListStatus] = useState<string>('Loading projects...');
+
+  // --- State for Project Name Input ---
+  const [showProjectNameInput, setShowProjectNameInput] = useState<boolean>(false);
+  const [projectName, setProjectName] = useState<string>('');
+
+  // --- Fetch Saved Projects on Mount --- 
+  useEffect(() => {
+    const fetchProjects = async () => {
+      setProjectListStatus('Loading project history...');
+      try {
+        // Call the modified listProjects
+        const result = await window.electronAPI.listProjects(); 
+        if (result.success && result.projects) {
+          setSavedProjects(result.projects);
+          setProjectListStatus(result.projects.length > 0 ? '' : 'No saved projects found.');
+        } else {
+          setSavedProjects([]);
+          setProjectListStatus(`Error loading projects: ${result.error || 'Unknown error'}`);
+          console.error("List Projects Error:", result.error);
+        }
+      } catch (error) {
+        setSavedProjects([]);
+        setProjectListStatus(`Error loading projects: ${error instanceof Error ? error.message : String(error)}`);
+        console.error("List Projects IPC Error:", error);
+      }
+    };
+    fetchProjects();
+  }, []);
 
   const updateFileState = (
     setter: React.Dispatch<React.SetStateAction<FileState>>,
@@ -230,77 +304,307 @@ const DataInputPage: React.FC = () => {
     };
   };
 
-  // --- Start Analysis Handler ---
-  const handleStartAnalysis = async () => {
+  // --- Modified handleStartAnalysis: Now just shows the input field --- 
+  const handleInitiateSave = () => {
     if (!canProcess) {
       setAnalysisStatus('Please ensure all files are uploaded and required columns are mapped.');
       return;
     }
+    setProjectName(''); // Initialize with an empty string
+    setShowProjectNameInput(true);
+    setAnalysisStatus('Please enter a name for the project configuration.');
+  };
 
+  // --- New handler: Saves config and starts backend job --- 
+  const handleSaveAndStart = async () => {
+    if (!projectName || projectName.trim().length === 0) {
+      setAnalysisStatus('Project name cannot be empty.');
+      return; 
+    }
+
+    setShowProjectNameInput(false);
     setIsAnalyzing(true);
-    setAnalysisStatus('Starting analysis...');
-    setLastJobId(null); // Reset last job ID
+    setAnalysisStatus('Saving project configuration...');
+    setLastJobId(null);
 
-    // Construct the payload
-    const payload: AnalysisPayload = {
-      spatialFileId: spatialFile.fileId!,
-      spatialMapping: {
-        geneCol: spatialFile.geneCol!,
-        xCol: spatialFile.xCol!,
-        yCol: spatialFile.yCol!,
-        layerCol: spatialFile.layerCol!
-      },
-      interactionsFileId: interactionsFile.fileId!,
-      interactionsMapping: {
-        ligandCol: interactionsFile.ligandCol!,
-        receptorCol: interactionsFile.receptorCol!
-      },
-      modulesFileId: modulesFile.fileId!,
-      modulesMapping: {
-        geneCol: modulesFile.geneCol!,
-        moduleCol: modulesFile.moduleCol!
-      }
-    };
+    // Prepare Project Data
+    const currentFileIds = { 
+      expression: spatialFile.fileId ?? undefined,
+      metadata: interactionsFile.fileId ?? undefined,
+      modules: modulesFile.fileId ?? undefined
+    }; 
+    
+    // Create mappings object, only including defined values
+    const currentMappings: ColumnMappings = {};
+    if (spatialFile.fileId) {
+        currentMappings.expression = {};
+        if (spatialFile.geneCol) currentMappings.expression.geneCol = spatialFile.geneCol;
+        if (spatialFile.xCol) currentMappings.expression.xCol = spatialFile.xCol;
+        if (spatialFile.yCol) currentMappings.expression.yCol = spatialFile.yCol;
+        if (spatialFile.layerCol) currentMappings.expression.layerCol = spatialFile.layerCol;
+        // Clean up empty object if no mappings were set
+        if (Object.keys(currentMappings.expression).length === 0) {
+            delete currentMappings.expression;
+        }
+    }
+    if (interactionsFile.fileId) {
+        currentMappings.metadata = {};
+        if (interactionsFile.ligandCol) currentMappings.metadata.ligandCol = interactionsFile.ligandCol;
+        if (interactionsFile.receptorCol) currentMappings.metadata.receptorCol = interactionsFile.receptorCol;
+        if (Object.keys(currentMappings.metadata).length === 0) {
+            delete currentMappings.metadata;
+        }
+    }
+    if (modulesFile.fileId) {
+        currentMappings.modules = {};
+        if (modulesFile.geneCol) currentMappings.modules.geneCol = modulesFile.geneCol;
+        if (modulesFile.moduleCol) currentMappings.modules.moduleCol = modulesFile.moduleCol;
+        if (Object.keys(currentMappings.modules).length === 0) {
+            delete currentMappings.modules;
+        }
+    }
 
-    console.log("[React] Sending analysis payload:", payload);
+    const projectData = { version: "1.0", files: currentFileIds, mappings: currentMappings };
+
+    let savedProjectInfo: ProjectListing | null = null;
+    let analysisStarted = false;
 
     try {
-      const response = await fetch('http://localhost:8000/api/analysis/start', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
+        // Save Project Config
+        console.log("[DataInputPage] Attempting to save project config...");
+        const saveResult = await window.electronAPI.saveProject(projectName.trim(), projectData);
+        if (!saveResult.success || !saveResult.filePath) {
+            throw new Error(saveResult.error || 'Failed to save project configuration.');
+        }
+        savedProjectInfo = { 
+            filePath: saveResult.filePath, 
+            name: saveResult.name!, 
+            savedAt: saveResult.savedAt! 
+        };
+        setSavedProjects(prev => [savedProjectInfo!, ...prev.filter(p => p.filePath !== savedProjectInfo!.filePath)]);
+        if (projectListStatus.includes('No saved projects')) setProjectListStatus('');
+        console.log('[DataInputPage] Project configuration saved:', savedProjectInfo);
 
-      const result = await response.json();
+        // Start Backend Analysis Job
+        setAnalysisStatus('Configuration saved. Starting analysis job...');
+        // Create payload, ensuring potentially undefined mappings are handled
+        const spatialMapping: AnalysisMapping = {};
+        if (spatialFile.geneCol) spatialMapping.geneCol = spatialFile.geneCol;
+        if (spatialFile.xCol) spatialMapping.xCol = spatialFile.xCol;
+        if (spatialFile.yCol) spatialMapping.yCol = spatialFile.yCol;
+        if (spatialFile.layerCol) spatialMapping.layerCol = spatialFile.layerCol;
+        
+        const interactionsMapping: AnalysisMapping = {};
+        if (interactionsFile.ligandCol) interactionsMapping.ligandCol = interactionsFile.ligandCol;
+        if (interactionsFile.receptorCol) interactionsMapping.receptorCol = interactionsFile.receptorCol;
+        
+        const modulesMapping: AnalysisMapping = {};
+        if (modulesFile.geneCol) modulesMapping.geneCol = modulesFile.geneCol;
+        if (modulesFile.moduleCol) modulesMapping.moduleCol = modulesFile.moduleCol;
 
-      if (!response.ok) {
-        throw new Error(result.detail || `Server error: ${response.status}`);
-      }
+        const payload: AnalysisPayload = {
+            spatialFileId: spatialFile.fileId!,
+            spatialMapping: spatialMapping, // Use the constructed mapping
+            interactionsFileId: interactionsFile.fileId!,
+            interactionsMapping: interactionsMapping, // Use the constructed mapping
+            modulesFileId: modulesFile.fileId!,
+            modulesMapping: modulesMapping // Use the constructed mapping
+        };
+        
+        // Removed redundant cleanup logic as undefined values are no longer added
+        console.log("[DataInputPage] Sending analysis payload:", JSON.stringify(payload));
 
-      console.log("[React] Analysis response received:", result);
-      setAnalysisStatus(`Analysis job started successfully! Job ID: ${result.job_id}`);
-      setLastJobId(result.job_id);
-      
-      // Navigate to the status page with the job ID
-      if (result.job_id) {
-        navigate(`/analysis/${result.job_id}`); 
-      }
+        const response = await fetch('http://localhost:8000/api/analysis/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+
+        console.log("[DataInputPage] Raw analysis start response status:", response.status);
+        const responseText = await response.text(); // Read body once
+        console.log("[DataInputPage] Raw analysis start response body:", responseText);
+
+        if (!response.ok) {
+             let errorDetail = `Server error: ${response.status} ${response.statusText}`;
+             try { errorDetail = JSON.parse(responseText).detail || errorDetail; } catch {} // Try parsing error from body
+             throw new Error(errorDetail);
+        }
+
+        const result = JSON.parse(responseText); // Parse the body we already read
+        console.log("[DataInputPage] Parsed analysis start result:", result);
+
+        if (!result.job_id) {
+            throw new Error("Backend started analysis but did not return a job_id.");
+        }
+
+        analysisStarted = true; // Mark as successful
+        setAnalysisStatus(`Analysis job started successfully! Job ID: ${result.job_id}`);
+        setLastJobId(result.job_id);
+        console.log("[DataInputPage] Navigating to results page for job:", result.job_id);
+        navigate(`/analysis/${result.job_id}`);
 
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error("[React] Error starting analysis:", errorMessage);
-      setAnalysisStatus(`Error starting analysis: ${errorMessage}`);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error("[DataInputPage] Error during project save or analysis start:", errorMessage);
+        setAnalysisStatus(`Error: ${errorMessage}`);
     } finally {
-      setIsAnalyzing(false);
+        if (!analysisStarted) {
+            setIsAnalyzing(false);
+        }
     }
   };
-  // --- End Analysis Handler ---
+
+  // --- Simplified handleLoadProjectUI ---
+  const handleLoadProjectUI = async (projectFilePath: string) => {
+    console.log('Attempting to load project configuration:', projectFilePath);
+    setProjectListStatus(`Loading project: ${path.basename(projectFilePath)}...`);
+    setIsAnalyzing(false); 
+    setAnalysisStatus(''); 
+
+    try {
+        const result = await window.electronAPI.loadProject(projectFilePath);
+        const loadResult = result as { success: boolean; error?: string; projectState?: SavedProjectData };
+
+        if (loadResult.success && loadResult.projectState) {
+            const loadedData = loadResult.projectState;
+            console.log("Loaded project data:", loadedData);
+
+            let newSpatial = createInitialFileState();
+            let newInteractions = createInitialFileState();
+            let newModules = createInitialFileState();
+
+            // Restore Mappings (uses local ColumnMappings type)
+            newSpatial = { ...newSpatial, ...(loadedData.mappings?.expression || {}) };
+            newInteractions = { ...newInteractions, ...(loadedData.mappings?.metadata || {}) };
+            newModules = { ...newModules, ...(loadedData.mappings?.modules || {}) };
+
+            newSpatial.fileId = loadedData.files.expression ?? null;
+            newInteractions.fileId = loadedData.files.metadata ?? null;
+            newModules.fileId = loadedData.files.modules ?? null;
+
+            const updateStateWithPlaceholder = (state: FileState, fileId: string | null | undefined): FileState => {
+                if (!fileId) return createInitialFileState();
+                return {
+                    ...state, 
+                    file: { name: `[Loaded: ${fileId.substring(0, 8)}...]` } as File,
+                    headers: [],
+                    previewRows: [],
+                    fileInfo: undefined,
+                    error: null,
+                    isLoading: false,
+                };
+            };
+            newSpatial = updateStateWithPlaceholder(newSpatial, newSpatial.fileId);
+            newInteractions = updateStateWithPlaceholder(newInteractions, newInteractions.fileId);
+            newModules = updateStateWithPlaceholder(newModules, newModules.fileId);
+
+            setSpatialFile(newSpatial);
+            setInteractionsFile(newInteractions);
+            setModulesFile(newModules);
+            
+            setProjectListStatus(''); 
+            setAnalysisStatus(`Project '${loadedData.projectName}' loaded. Review mappings and click 'Save & Start Analysis' to run.`);
+            setShowProjectNameInput(false); 
+            console.log("[DataInputPage] State updated after load.");
+
+        } else {
+            setProjectListStatus(`Error loading project: ${loadResult.error || 'Unknown error'}`);
+            console.error("Load Error:", loadResult.error);
+        }
+    } catch (error) {
+        setProjectListStatus(`Error loading project: ${error instanceof Error ? error.message : String(error)}`);
+        console.error("Load IPC Error:", error);
+    }
+  };
+
+  // handleDeleteSpecificProject (Ensure it updates projectListStatus)
+  const handleDeleteSpecificProject = async (filePath: string, projectName: string) => {
+    // Proceed directly to calling the Electron main process, which will show its own dialog
+    setProjectListStatus(`Deleting project: ${projectName}...`);
+    try {
+        // Pass projectName to the Electron API call
+        const result = await window.electronAPI.deleteProject(filePath, projectName);
+        
+        // Handle the result (success or cancellation/error)
+        if (result.success) {
+             setProjectListStatus(`Project '${projectName}' deleted.`);
+             setSavedProjects(prev => prev.filter(p => p.filePath !== filePath));
+             setTimeout(() => setProjectListStatus(savedProjects.length -1 === 0 ? 'No saved projects found.' : ''), 3000);
+        } else {
+             // Handle cancellation message specifically
+             if (result.error === 'Delete cancelled by user.') {
+                 setProjectListStatus('Delete operation cancelled.');
+             } else {
+                 // Handle other errors
+                 throw new Error(result.error || 'Unknown error during deletion.');
+             }
+        }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      setProjectListStatus(`Error deleting project '${projectName}': ${msg}`);
+      console.error("Delete Project Error:", error);
+      // Set timeout to clear error message later
+      setTimeout(() => setProjectListStatus(savedProjects.length > 0 ? '' : 'No saved projects found.'), 5000);
+    }
+  };
+
+  // formatProjectDate (Helper for display)
+  const formatProjectDate = (isoDateString: string): string => {
+    try {
+      return new Date(isoDateString).toLocaleString();
+    } catch { 
+      return isoDateString; // Fallback
+    } 
+  };
 
   return (
     <div className={styles.container}>
       <h1 className={styles.pageTitle}>Data Input</h1>
+
+      {/* --- Project History Table --- */}
+      <section className={styles.section}>
+        <h2 className={styles.sectionTitle}>Project History</h2>
+        {projectListStatus && <p className={styles.statusMessage}><i>{projectListStatus}</i></p>}
+        {savedProjects.length > 0 ? (
+          <table className={styles.projectTable}> {/* Add CSS for projectTable */} 
+            <thead>
+              <tr>
+                <th>Project Name</th>
+                <th>Date Saved</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {savedProjects.map((proj) => (
+                <tr key={proj.filePath}>
+                  <td>{proj.name}</td>
+                  <td>{formatProjectDate(proj.savedAt)}</td>
+                  <td className={styles.projectActions}> {/* Add CSS */} 
+                    <button
+                      onClick={() => handleLoadProjectUI(proj.filePath)}
+                      className={styles.projectActionButton} /* Add CSS */ 
+                      disabled={isAnalyzing} 
+                      title="Load this project configuration"
+                    >
+                      Load Configuration
+                    </button>
+                    <button
+                      onClick={() => handleDeleteSpecificProject(proj.filePath, proj.name)}
+                      className={`${styles.projectActionButton} ${styles.deleteButton}`} /* Add CSS */
+                      disabled={isAnalyzing} 
+                      title="Delete this project configuration"
+                    >
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          !projectListStatus.includes('Loading') && <p>No saved project configurations found.</p>
+        )}
+      </section>
 
       {/* Spatial Data Section */}
       <section className={styles.section}>
@@ -395,13 +699,48 @@ const DataInputPage: React.FC = () => {
       {/* Analysis Trigger Section */}
       <section className={`${styles.section} ${styles.analysisSection}`}>
         <h2 className={styles.sectionTitle}>4. Run Analysis</h2>
-        <button 
-          className={styles.startButton} 
-          onClick={handleStartAnalysis} 
-          disabled={!canProcess || isAnalyzing} // Disable if not ready or already analyzing
-        >
-          {isAnalyzing ? 'Processing...' : 'Start Analysis'}
-        </button>
+        
+        {/* Conditionally show input or button */} 
+        {!showProjectNameInput ? (
+          <>
+            <p>Upload or modify data above, then start a new analysis run.</p>
+            <button
+              className={styles.startButton}
+              onClick={handleInitiateSave}
+              disabled={!canProcess || isAnalyzing}
+            >
+              {isAnalyzing ? 'Processing...' : 'Save & Start Analysis'}
+            </button>
+          </>
+        ) : (
+          <div className={styles.projectNameInputArea}>
+            <label htmlFor="projectName">Project Name:</label>
+            <input 
+              type="text"
+              id="projectName"
+              value={projectName}
+              onChange={(e) => setProjectName(e.target.value)}
+              className={styles.projectNameInput}
+              placeholder="Enter a name for this configuration"
+            />
+            <button 
+              onClick={handleSaveAndStart}
+              disabled={isAnalyzing || !projectName.trim()}
+              className={styles.confirmButton}
+            >
+              {isAnalyzing ? 'Saving...' : 'Confirm & Start'}
+            </button>
+            <button 
+              onClick={() => { setShowProjectNameInput(false); setAnalysisStatus(''); }}
+              disabled={isAnalyzing}
+              className={styles.cancelButton}
+              title="Cancel saving configuration"
+            >
+               Cancel
+            </button>
+          </div>
+        )}
+        
         {analysisStatus && (
           <p 
             className={styles.statusMessage} 
@@ -410,10 +749,8 @@ const DataInputPage: React.FC = () => {
             {analysisStatus}
           </p>
         )}
-        {/* Simple link placeholder - replace with proper routing/navigation later */}
         {lastJobId && analysisStatus.includes('successfully') && (
             <p className={styles.statusMessage}> 
-               {/* In a real app, this would be a Link component from react-router-dom */}
                <a href="#" onClick={(e) => { e.preventDefault(); alert(`Navigate to results for job: ${lastJobId}`)} }>
                    View Results (Job: {lastJobId})
                </a>

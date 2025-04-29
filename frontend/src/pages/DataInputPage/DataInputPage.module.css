@@ -30,7 +30,7 @@
   padding-bottom: 8px;
 }
 
-.processButton {
+.startButton {
   padding: 12px 24px;
   font-size: 1.1em;
   background-color: #28a745;
@@ -43,12 +43,129 @@
   font-weight: 500;
 }
 
-.processButton:hover {
+.startButton:hover {
   background-color: #218838;
 }
 
-.processButton:disabled {
+.startButton:disabled {
   background-color: #cccccc;
+  color: #ffffff !important;
+  cursor: not-allowed;
+}
+
+/* Styles for Project Name Input Area */
+.projectNameInputArea {
+  display: flex;
+  align-items: center;
+  gap: 10px; /* Spacing between elements */
+  padding: 15px;
+  background-color: #e9ecef; /* Slightly different background */
+  border-radius: 5px;
+  margin-top: 10px;
+}
+
+.projectNameInputArea label {
+  font-weight: 500;
+  white-space: nowrap; /* Prevent label wrapping */
+}
+
+.projectNameInput {
+  flex-grow: 1; /* Allow input to take available space */
+  padding: 8px 12px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  font-size: 1em;
+}
+
+.confirmButton, .cancelButton {
+  padding: 8px 15px;
+  font-size: 0.95em;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  white-space: nowrap;
+}
+
+.confirmButton {
+  background-color: #007bff; /* Blue */
+  color: white;
+}
+
+.confirmButton:hover {
+  background-color: #0056b3;
+}
+
+.confirmButton:disabled {
+  background-color: #a0cfff; /* Lighter blue when disabled */
+  cursor: not-allowed;
+}
+
+.cancelButton {
+  background-color: #6c757d; /* Gray */
+  color: white;
+}
+
+.cancelButton:hover {
+  background-color: #5a6268;
+}
+
+.cancelButton:disabled {
+   background-color: #adb5bd;
+   cursor: not-allowed;
+}
+
+/* Styles for Project History Table Buttons */
+.projectActions {
+  white-space: nowrap; /* Prevent buttons wrapping */
+  text-align: right;
+}
+
+.projectActionButton {
+  padding: 6px 12px;
+  font-size: 0.9em;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  margin-left: 5px; /* Space between buttons */
+  border: 1px solid transparent;
+}
+
+/* Style for the 'Load' button */
+.projectActionButton:not(.deleteButton) {
+  background-color: #17a2b8; /* Teal/Info color */
+  color: white;
+  border-color: #17a2b8;
+}
+
+.projectActionButton:not(.deleteButton):hover {
+  background-color: #138496;
+  border-color: #117a8b;
+}
+
+.projectActionButton:not(.deleteButton):disabled {
+  background-color: #9eeaf9;
+  border-color: #9eeaf9;
+  color: #6c757d; /* Maybe slightly darker text when disabled */
+  cursor: not-allowed;
+}
+
+/* Style for the 'Delete' button */
+.deleteButton {
+  background-color: #dc3545; /* Red/Danger color */
+  color: white;
+  border-color: #dc3545;
+}
+
+.deleteButton:hover {
+  background-color: #c82333;
+  border-color: #bd2130;
+}
+
+.deleteButton:disabled {
+  background-color: #f1b0b7;
+  border-color: #f1b0b7;
+  color: #6c757d;
   cursor: not-allowed;
 }
 
@@ -70,7 +187,7 @@
     font-size: 1.2em;
   }
   
-  .processButton {
+  .startButton {
     width: 100%;
   }
 } 

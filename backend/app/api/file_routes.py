@@ -1,5 +1,5 @@
 """File handling API routes."""
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Response, status
 from pathlib import Path
 import os
 import tempfile
@@ -53,3 +53,38 @@ async def upload_and_preview_file(file: UploadFile = File(...)):
     except Exception as e:
         # Catch unexpected errors during processing
         raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}") 
+
+@router.delete("/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_temporary_file(file_id: str):
+    """
+    Deletes a specific temporary file from the backend storage based on its ID.
+    Returns 204 No Content on success.
+    Returns 404 Not Found if the file doesn't exist.
+    Returns 500 Internal Server Error on other deletion errors.
+    """
+    try:
+        # Use FileService to find the path associated with the ID
+        file_path = FileService.get_file_path(file_id)
+        
+        # Check if file actually exists at the path found
+        if not file_path.is_file():
+             # This case might occur if get_file_path logic has issues or file was already deleted
+             raise HTTPException(status_code=404, detail=f"File with ID {file_id} not found at expected path.")
+
+        # Attempt to delete the file
+        os.unlink(file_path)
+        print(f"Deleted temporary file: {file_path}") # Optional logging
+        # No need to return anything on successful deletion with 204 status code
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+        
+    except HTTPException as e:
+        # Re-raise specific HTTP exceptions (like 404 from get_file_path)
+        raise e
+    except OSError as e:
+        # Handle specific OS errors during deletion (e.g., permissions)
+        print(f"Error deleting file {file_path}: {e}") # Optional logging
+        raise HTTPException(status_code=500, detail=f"Failed to delete file {file_id}: OS Error")
+    except Exception as e:
+        # Catch any other unexpected errors
+        print(f"Unexpected error deleting file {file_id}: {e}") # Optional logging
+        raise HTTPException(status_code=500, detail=f"Failed to delete file {file_id}: Server Error") 
