@@ -46,10 +46,8 @@ To create an intuitive, cross-platform application that empowers researchers to:
 
     *   **Core Visualization Library:** **Deck.gl**
     *   **Basic Sample View (`ScatterplotLayer`):**
-        *   Displays spatial coordinates of spots (downsampled for performance).
-        *   Color-codes spots by layer.
+        *   Displays spatial coordinates of spots
     *   **Advanced Interaction Visualization:**
-        *   Overlay pathway/interaction information onto the spatial plot.
         *   Visualize interaction scores spatially using different metrics:
             *   **Co-occurrence Score:** Based on Ligand KDE * Receptor KDE.
             *   **Ligand Density Score:** Ligand KDE evaluated at receptor locations.

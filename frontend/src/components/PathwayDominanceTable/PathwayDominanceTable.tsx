@@ -1,9 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import styles from './PathwayDominanceTable.module.css'; // Assume CSS module exists or create it
 import { PathwayDominanceResult } from '../../types/analysisResults';
+import Visualization from '../Visualization/Visualization';
 
 interface PathwayDominanceTableProps {
   data: PathwayDominanceResult[] | null;
+  onRowClick?: (row: PathwayDominanceResult) => void;
 }
 
 // Helper to format header
@@ -32,7 +34,9 @@ const formatCellValue = (value: any): string => {
     return String(value);
 };
 
-const PathwayDominanceTable: React.FC<PathwayDominanceTableProps> = ({ data }) => {
+const PathwayDominanceTable: React.FC<PathwayDominanceTableProps> = ({ data, onRowClick }) => {
+  const [selectedRow, setSelectedRow] = useState<PathwayDominanceResult | null>(null);
+
   if (!data || data.length === 0) {
     return <p className={styles.noData}>No Pathway Dominance data available.</p>;
   }
@@ -47,26 +51,51 @@ const PathwayDominanceTable: React.FC<PathwayDominanceTableProps> = ({ data }) =
       'score' 
   ];
 
+  const handleRowClick = (row: PathwayDominanceResult) => {
+    setSelectedRow(row);
+    if (onRowClick) {
+      onRowClick(row);
+    }
+  };
+
   return (
     <div className={styles.tableContainer}>
-      <table className={styles.table}>
-        <thead>
-          <tr>
-            {columns.map(col => (
-              <th key={col} className={styles.th}>{formatHeader(col)}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {data.map((row, rowIndex) => (
-            <tr key={rowIndex} className={styles.tr}>
+      <div className={styles.tableWrapper}>
+        <table className={styles.table}>
+          <thead>
+            <tr>
               {columns.map(col => (
-                <td key={col} className={styles.td}>{formatCellValue(row[col])}</td>
+                <th key={col} className={styles.th}>{formatHeader(col)}</th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {data.map((row, rowIndex) => (
+              <tr 
+                key={rowIndex} 
+                className={`${styles.tr} ${selectedRow === row ? styles.selectedRow : ''}`}
+                onClick={() => handleRowClick(row)}
+              >
+                {columns.map(col => (
+                  <td key={col} className={styles.td}>{formatCellValue(row[col])}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {selectedRow && (
+        <div className={styles.visualizationContainer}>
+          <Visualization
+            data={{
+              ligand: [], // TODO: Get actual ligand data from backend
+              receptor: [], // TODO: Get actual receptor data from backend
+            }}
+            ligandName={selectedRow.ligand}
+            receptorName={selectedRow.receptor}
+          />
+        </div>
+      )}
     </div>
   );
 };

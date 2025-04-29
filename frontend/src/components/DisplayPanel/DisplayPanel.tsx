@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import styles from './DisplayPanel.module.css';
 import SummaryStats from '../SummaryStats/SummaryStats';
 import PathwayDominanceTable from '../PathwayDominanceTable/PathwayDominanceTable';
 import ModuleContextTable from '../ModuleContextTable/ModuleContextTable';
 import { PathwayDominanceResult, ModuleContextResult, SummaryStatsData } from '../../types/analysisResults';
+import Visualization from '../Visualization/Visualization';
 
 // Match prop types from ResultsPage
 type ScopeType = 'whole_tissue' | 'layers';
@@ -16,12 +17,49 @@ interface DisplayPanelProps {
   layers: string[]; // Selected layers if scope is 'layers'
 }
 
+interface VisualizationData {
+  ligand: {
+    x: number;
+    y: number;
+  }[];
+  receptor: {
+    x: number;
+    y: number;
+  }[];
+}
+
 const DisplayPanel: React.FC<DisplayPanelProps> = ({
   analysisType,
   data,
   scope,
   layers
 }) => {
+  const [selectedInteraction, setSelectedInteraction] = useState<PathwayDominanceResult | null>(null);
+  const [visualizationData, setVisualizationData] = useState<VisualizationData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchVisualizationData = async (ligand: string, receptor: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`http://localhost:8000/api/visualization/${ligand}/${receptor}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch visualization data');
+      }
+      const data = await response.json();
+      setVisualizationData(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An unknown error occurred');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRowClick = (row: PathwayDominanceResult) => {
+    setSelectedInteraction(row);
+    fetchVisualizationData(row.ligand, row.receptor);
+  };
 
   const renderContent = () => {
     if (data === null || data === undefined) {
@@ -46,7 +84,21 @@ const DisplayPanel: React.FC<DisplayPanelProps> = ({
         return (
           <div>
             <h3 className={styles.subTitle}>Pathway Dominance</h3>
-            <PathwayDominanceTable data={data as PathwayDominanceResult[]} />
+            <PathwayDominanceTable 
+              data={data as PathwayDominanceResult[]} 
+              onRowClick={handleRowClick}
+            />
+            {loading && <p className={styles.loading}>Loading visualization...</p>}
+            {error && <p className={styles.error}>{error}</p>}
+            {visualizationData && selectedInteraction && (
+              <div className={styles.visualizationContainer}>
+                <Visualization
+                  data={visualizationData}
+                  ligandName={selectedInteraction.ligand}
+                  receptorName={selectedInteraction.receptor}
+                />
+              </div>
+            )}
           </div>
         );
       case 'module_context':
