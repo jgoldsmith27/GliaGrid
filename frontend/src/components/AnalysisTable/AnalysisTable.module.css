@@ -21,12 +21,13 @@
     border-bottom: 2px solid #ddd;
     position: sticky;
     top: 0;
-    z-index: 2;
+    color: #111; /* Add dark text color for contrast */
 }
 
 .td {
     padding: 12px;
     border-bottom: 1px solid #ddd;
+    color: #333; /* Add default dark text color */
 }
 
 .tr {
