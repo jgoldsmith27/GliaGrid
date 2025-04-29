@@ -1,13 +1,29 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom'; // Import useParams
 import styles from './ResultsPage.module.css';
-import ControlPanel from '../../components/ControlPanel/ControlPanel';
-import DisplayPanel from '../../components/DisplayPanel/DisplayPanel';
 import LoadingSpinner from '../../components/LoadingSpinner/LoadingSpinner';
+import SummaryTabContent from '../../components/ResultsPage/SummaryTabContent'; // New name
+import ScopeSelector from '../../components/ScopeSelector/ScopeSelector'; // Assuming this exists
+import LayerSelector from '../../components/LayerSelector/LayerSelector'; // Assuming this exists
+import { PathwayDominanceResult, ModuleContextResult } from '../../types/analysisResults'; // Import types
 
 // Define types for the selections
 type ScopeType = 'whole_tissue' | 'layers';
-type AnalysisType = 'summary' | 'pathway_dominance' | 'module_context';
+// type AnalysisType = 'summary' | 'pathway_dominance' | 'module_context'; // No longer needed
+// type ResultsTab = 'Summary' | 'Custom'; // Removed
+
+// Define the structure for combined data
+export interface CombinedInteractionData {
+  ligand: string;
+  receptor: string;
+  score?: number; // Pathway score
+  ligand_norm_expr?: number;
+  receptor_avg_norm_expr?: number;
+  interaction_type?: string;
+  ligand_module?: string;
+  receptor_modules?: string[];
+  is_same_module?: boolean;
+}
 
 // interface ResultsPageProps { // No longer needed
 //   jobId: string | null;
@@ -21,11 +37,13 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
   const [isLoading, setIsLoading] = useState<boolean>(true); // Still useful for initial load/connection
   const [error, setError] = useState<string | null>(null);
   
-  // State for UI controls
+  // --- UI/Data State ---
+  // const [currentTab, setCurrentTab] = useState<ResultsTab>('Summary'); // Removed
   const [selectedScope, setSelectedScope] = useState<ScopeType>('whole_tissue');
-  const [selectedLayers, setSelectedLayers] = useState<string[]>([]); // e.g., ['layer_1', 'layer_2']
-  const [selectedAnalysisType, setSelectedAnalysisType] = useState<AnalysisType>('summary');
-  // TODO: Add state for filters
+  const [availableLayers, setAvailableLayers] = useState<string[]>([]);
+  const [selectedLayers, setSelectedLayers] = useState<string[]>([]); 
+  const [selectedPair, setSelectedPair] = useState<[string, string] | null>(null);
+  const [combinedAnalysisData, setCombinedAnalysisData] = useState<CombinedInteractionData[]>([]);
 
   useEffect(() => {
     if (!jobId) {
@@ -51,6 +69,9 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
         const data = JSON.parse(event.data);
         console.log('[WebSocket] Message received:', data);
         setJobStatus(data);
+        if (data.results) {
+            setAvailableLayers(Object.keys(data.results).filter(k => k !== 'whole_tissue'));
+        }
 
         // Update loading state based on received status
         if (data.status === 'success' || data.status === 'failed' || data.status === 'error') {
@@ -124,6 +145,83 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
     }
   }, [selectedScope, jobStatus, selectedLayers]);
 
+  // --- Effect to Process Results and Combine Data ---
+  useEffect(() => {
+      if (!jobStatus || !jobStatus.results) {
+          setCombinedAnalysisData([]);
+          setSelectedPair(null);
+          return;
+      }
+
+      let scopeData = selectedScope === 'whole_tissue' 
+          ? jobStatus.results.whole_tissue 
+          : selectedLayers.length > 0 
+              ? jobStatus.results[selectedLayers[0]]
+              : null;
+
+      if (!scopeData || !scopeData.pathway_dominance || !scopeData.module_context) {
+          console.warn("Missing pathway_dominance or module_context data for scope:", selectedScope, selectedLayers[0]);
+          setCombinedAnalysisData([]);
+          setSelectedPair(null);
+          return;
+      }
+
+      const pathwayData: PathwayDominanceResult[] = scopeData.pathway_dominance;
+      const moduleData: ModuleContextResult[] = scopeData.module_context;
+
+      // Create a map for faster module context lookup
+      const moduleContextMap = new Map<string, ModuleContextResult>();
+      moduleData.forEach(item => {
+          moduleContextMap.set(`${item.ligand}-${item.receptor}`, item);
+      });
+
+      const combined: CombinedInteractionData[] = pathwayData.map(pathwayItem => {
+          const moduleItem = moduleContextMap.get(`${pathwayItem.ligand}-${pathwayItem.receptor}`);
+          
+          return {
+              ligand: pathwayItem.ligand,
+              receptor: pathwayItem.receptor,
+              score: pathwayItem.score,
+              ligand_norm_expr: pathwayItem.ligand_norm_expr,
+              receptor_avg_norm_expr: pathwayItem.receptor_avg_norm_expr,
+              // Merge module context data if found
+              interaction_type: moduleItem?.interaction_type,
+              ligand_module: moduleItem?.ligand_module,
+              receptor_modules: moduleItem?.receptor_modules,
+              is_same_module: moduleItem?.is_same_module,
+          };
+      });
+
+      setCombinedAnalysisData(combined);
+      
+      // If the currently selected pair is no longer in the combined data (e.g., scope changed), reset it
+      if (selectedPair && !combined.some(item => item.ligand === selectedPair[0] && item.receptor === selectedPair[1])) {
+           setSelectedPair(null); // Reset to null instead of first item
+      }
+      // Ensure selectedPair is null if combined data is empty
+      if (combined.length === 0) {
+          setSelectedPair(null);
+      }
+      
+  }, [jobStatus, selectedScope, selectedLayers]); // Re-run when results or scope change
+
+  const handleSelectPair = useCallback((pair: [string, string]) => {
+    setSelectedPair(pair);
+  }, []);
+  
+  // --- Scope Change Handlers ---
+  const handleScopeChange = useCallback((scope: ScopeType) => {
+    setSelectedScope(scope);
+    // Reset selected layers when switching to whole_tissue
+    if (scope === 'whole_tissue') {
+        setSelectedLayers([]);
+    }
+  }, []);
+
+  const handleLayersChange = useCallback((layers: string[]) => {
+    setSelectedLayers(layers);
+  }, []);
+
   // --- UI Rendering --- 
 
   // Display connection status or initial loading message
@@ -174,65 +272,51 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
   }
 
   // We have successful results here
-  const results = jobStatus.results;
+  // const results = jobStatus.results; // Keep results accessible if needed
 
-  // Extract available layers from results for the LayerSelector
-  const availableLayers = results ? Object.keys(results).filter(k => k !== 'whole_tissue') : [];
+  // Extract available layers from results for the LayerSelector - REMOVE THIS
+  // const availableLayers = results ? Object.keys(results).filter(k => k !== 'whole_tissue') : [];
 
-  // TODO: Filter/select data based on state (selectedScope, selectedLayers, selectedAnalysisType)
-  const getDataForDisplay = () => {
-      if (!results) return null;
-      
-      let scopeData = selectedScope === 'whole_tissue' 
-          ? results.whole_tissue 
-          : selectedLayers.length > 0 
-              ? results[selectedLayers[0]] // Show the selected layer
-              : null;
-
-      if (!scopeData) return null;
-
-      switch(selectedAnalysisType) {
-          case 'summary': return scopeData.ligand_receptor_counts;
-          case 'pathway_dominance': return scopeData.pathway_dominance;
-          case 'module_context': return scopeData.module_context;
-          default: return null;
-      }
-  };
-
-  const displayData = getDataForDisplay();
-
+  // --- Render Main Layout --- 
   return (
-    <div className={styles.container}>
-      {/* <h1 className={styles.pageTitle}>Analysis Results</h1> REMOVED */}
-      
-      <div className={styles.resultsLayout}>
-          <div className={styles.controlPanelContainer}>
-              <ControlPanel 
-                  selectedScope={selectedScope}
-                  onScopeChange={setSelectedScope}
-                  availableLayers={availableLayers}
-                  selectedLayers={selectedLayers}
-                  onLayersChange={setSelectedLayers}
-                  selectedAnalysisType={selectedAnalysisType}
-                  onAnalysisTypeChange={setSelectedAnalysisType}
-              />
-          </div>
-          <div className={styles.displayPanelContainer}>
-              <DisplayPanel 
-                  analysisType={selectedAnalysisType}
-                  data={displayData}
-                  scope={selectedScope}
-                  layers={selectedLayers}
-                  jobId={jobId || ''}
-                  selectedLayer={selectedScope === 'layers' && selectedLayers.length > 0 ? selectedLayers[0] : 'whole_tissue'}
-              />
-          </div>
-          {/* Optional Comparison Panel - can add later */}
-          {/* <div className={styles.comparisonPanelContainer}>
-              <h2>Comparison (Placeholder)</h2>
-          </div> */}
+    <div className={styles.resultsPageLayout}> {/* New overall layout class */} 
+      {/* Control Area */}
+      <div className={styles.controlArea}>
+        <h3>Scope & Settings</h3>
+        <div className={styles.controlGroup}>
+           <label className={styles.controlLabel}>Analysis Scope:</label>
+            <ScopeSelector 
+                selectedScope={selectedScope} 
+                onScopeChange={handleScopeChange} 
+            />
+        </div>
+        {selectedScope === 'layers' && (
+            <div className={styles.controlGroup}>
+            <label className={styles.controlLabel}>Select Layer:</label>
+            <LayerSelector 
+                availableLayers={availableLayers} 
+                selectedLayers={selectedLayers} 
+                onLayersChange={handleLayersChange} 
+            />
+             {selectedLayers.length > 1 && (
+                 <p className={styles.warning}>Warning: Multiple layers selected, analysis uses only the first ({selectedLayers[0]}).</p>
+             )}
+            </div>
+        )}
+         {/* Add other filters/settings here later */}
       </div>
 
+      {/* Content Area */} 
+      <div className={styles.contentArea}>
+          <SummaryTabContent 
+                jobId={jobId || ''} 
+                combinedData={combinedAnalysisData}
+                selectedPair={selectedPair}
+                onSelectPair={handleSelectPair}
+                // Pass the specific layer string needed for the API call
+                selectedLayerName={selectedScope === 'layers' && selectedLayers.length > 0 ? selectedLayers[0] : 'whole_tissue'} 
+            />
+      </div>
     </div>
   );
 };

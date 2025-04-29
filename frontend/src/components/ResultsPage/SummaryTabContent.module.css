@@ -1,0 +1,75 @@
+/* Styles for SummaryTabContent */
+
+.summaryLayout {
+  display: flex;
+  flex-direction: row; /* Arrange items side-by-side */
+  gap: 20px; 
+  padding: 10px; /* Add some padding around the content */
+  height: calc(100vh - 150px); /* Example: Calculate height based on viewport minus header/tabs */
+  overflow: hidden; /* Prevent overall layout scroll */
+}
+
+.tableArea {
+  flex: 2; /* Give table 2/3rds of the initial space */
+  min-width: 300px;
+  overflow-y: auto; /* Allow table area to scroll vertically */
+  height: 100%; /* Fill the height of the layout */
+}
+
+.visualizationArea {
+  flex: 1; /* Give visualization 1/3rd of the initial space */
+  min-width: 250px;
+  height: 100%; /* Fill the height of the layout */
+  display: flex; /* Use flexbox internally for centering/layout */
+  flex-direction: column;
+}
+
+.visualizationArea h3 {
+    flex-shrink: 0; /* Prevent title shrinking */
+}
+
+/* Ensure Visualization component takes available space within its container */
+.visualizationArea > div:has(> .visualizationContainer) { /* Target direct child containing Visualization */
+    flex-grow: 1;
+    min-height: 0; /* Important for flex children */
+}
+
+/* Loading/Error/Warning Styles (keep as before or adjust) */
+.loadingContainer {
+  text-align: center;
+  padding: 20px;
+}
+
+.error {
+  color: red;
+  padding: 10px;
+  border: 1px solid red;
+}
+
+.warningsContainer {
+  border: 1px solid orange;
+  padding: 10px;
+  margin-bottom: 10px;
+  font-size: 0.9em;
+  max-height: 100px; /* Limit warning height */
+  overflow-y: auto;
+  flex-shrink: 0; /* Prevent warnings shrinking viz */
+}
+
+.warningsContainer h4 {
+  margin-top: 0;
+}
+
+.cancelButton {
+  margin-left: 10px;
+  color: #FFF !important; /* Force white text */
+  background-color: #555 !important; /* Force a medium-dark background */
+  border: 1px solid #888 !important; /* Add a border */
+  padding: 2px 8px !important; /* Adjust padding slightly */
+  border-radius: 4px !important; /* Adjust radius slightly */
+  font-size: 0.9em !important; /* Adjust font size slightly */
+}
+
+.cancelButton:hover {
+    background-color: #777 !important; /* Lighter background on hover */
+} 
