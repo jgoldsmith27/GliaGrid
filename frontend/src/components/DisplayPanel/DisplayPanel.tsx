@@ -246,18 +246,18 @@ const DisplayPanel: React.FC<DisplayPanelProps> = ({
                             data={visualizationData}
                             ligandName={selectedInteraction.ligand}
                             receptorName={selectedInteraction.receptor}
+                            currentScope={selectedLayer}
                         />
                     )}
                     
-                    {/* Improved Placeholder/Empty State Messages */}
-                    {!loading && !error && !visualizationData && selectedInteraction && (
-                         <p className={styles.noData}>Waiting for visualization data...</p> // Initial state before fetch finishes
+                    {/* Message if interaction selected but no points found */} 
+                    {visualizationData && !(visualizationData.ligand.length > 0 || visualizationData.receptor.length > 0) && selectedInteraction && !loading && (
+                        <p className={styles.noData}>No spatial data found for {selectedInteraction.ligand} - {selectedInteraction.receptor} in {selectedLayer}.</p>
                     )}
-                    {!loading && !error && visualizationData && visualizationData.ligand.length === 0 && visualizationData.receptor.length === 0 && selectedInteraction && vizWarnings.length === 0 && (
-                        <p className={styles.noData}>Visualization data loaded but is empty (no warnings received).</p> // Explicit empty state
-                    )}
-                    {!loading && !error && !selectedInteraction && (
-                        <p className={styles.noData}>Click on a row in the table to visualize interaction.</p>
+
+                    {/* Placeholder if no interaction is selected yet */}
+                    {!selectedInteraction && !loading && showVisualization && (
+                        <p className={styles.placeholder}>Select an interaction from the table to visualize.</p>
                     )}
                 </div>
             )}

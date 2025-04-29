@@ -3,6 +3,7 @@ import { ScatterplotLayer } from '@deck.gl/layers';
 import DeckGL from '@deck.gl/react';
 import { OrthographicView, OrthographicViewState, ViewStateChangeParameters } from '@deck.gl/core';
 import styles from './Visualization.module.css';
+import DensityMapControls from './DensityMapControls';
 
 interface Point {
   x: number;
@@ -16,6 +17,7 @@ interface VisualizationProps {
   };
   ligandName: string;
   receptorName: string;
+  currentScope: string;
 }
 
 // Helper function to calculate initial view state based on data bounds for OrthographicView
@@ -53,7 +55,7 @@ const getInitialViewState = (ligandData: Point[], receptorData: Point[]) => {
     };
 };
 
-const Visualization: React.FC<VisualizationProps> = ({ data, ligandName, receptorName }) => {
+const Visualization: React.FC<VisualizationProps> = ({ data, ligandName, receptorName, currentScope }) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Calculate initial view state memoized based on data
@@ -73,31 +75,29 @@ const Visualization: React.FC<VisualizationProps> = ({ data, ligandName, recepto
     setViewState(initialViewState as OrthographicViewState);
   }, [initialViewState]);
 
-  const onViewStateChange = useCallback(({ viewState }: ViewStateChangeParameters<OrthographicViewState>) => {
-    setViewState(viewState);
+  const onViewStateChange = useCallback(({ viewState: vs }: ViewStateChangeParameters<OrthographicViewState>) => {
+    setViewState(vs as OrthographicViewState);
   }, []);
 
   const handleZoom = useCallback((zoomIncrement: number) => {
     setViewState((currentViewState) => {
-        const currentZoom = currentViewState.zoom ?? 0; 
-        let nextZoom: number | [number, number];
+        const state = currentViewState as OrthographicViewState;
+        const currentZoom = state.zoom ?? 0;
+        let nextZoom: number = 0;
 
-        // Handle different zoom formats (number or array - though Orthographic usually uses number)
         if (typeof currentZoom === 'number') {
             nextZoom = currentZoom + zoomIncrement;
-        } else if (Array.isArray(currentZoom) && currentZoom.length === 2) {
-            nextZoom = [currentZoom[0] + zoomIncrement, currentZoom[1] + zoomIncrement];
         } else {
-            console.warn("Unexpected zoom format in viewState:", currentZoom);
-            nextZoom = 0 + zoomIncrement; 
+            console.warn("Unexpected zoom format in Orthographic viewState:", currentZoom);
+            nextZoom = zoomIncrement;
         }
         
         return {
-            ...currentViewState,
+            ...state,
             zoom: nextZoom
-        };
+        } as OrthographicViewState;
     });
-  }, []); // Empty dependency array as it only uses setViewState
+  }, []);
   // --- End Zoom Logic --- 
 
   const layers = [
@@ -169,6 +169,14 @@ const Visualization: React.FC<VisualizationProps> = ({ data, ligandName, recepto
             </div>
         </div>
       </div>
+
+      {!isFullscreen && (
+        <DensityMapControls 
+          ligandName={ligandName}
+          receptorName={receptorName}
+          currentScope={currentScope}
+        />
+      )}
     </div>
   );
 };
