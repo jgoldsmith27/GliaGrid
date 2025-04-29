@@ -87,7 +87,7 @@ async def get_visualization_data(
             if layer_df.empty:
                 logger.warning(f"No data found for layer '{layer}' in job {job_id}.")
                 # Return empty data instead of 404/400, frontend can handle this
-                return {"ligand": [], "receptor": []}
+                return {"ligand": [], "receptor": [], "warnings": []}
             logger.info(f"Filtered data for layer '{layer}' in job {job_id}. Shape: {layer_df.shape}")
 
         # 4. For ligand and receptor, extract x/y for each from the selected scope (layer_df)
@@ -98,26 +98,33 @@ async def get_visualization_data(
         ligand_points = layer_df[layer_df["gene"] == ligand][["x", "y"]]
         receptor_points = layer_df[layer_df["gene"] == receptor][["x", "y"]]
         
+        warnings = [] # Initialize warnings list
+        
         # Handle cases where ligand/receptor might not be in the scope gracefully
         ligand_data = ligand_points.to_dict("records") if not ligand_points.empty else []
         receptor_data = receptor_points.to_dict("records") if not receptor_points.empty else []
 
-        # Improved Logging
+        # Improved Logging & Populate Warnings
         if not ligand_data:
-             logger.warning(f"No data found for ligand '{ligand}' in {scope_name} for job {job_id}.")
+             warning_msg = f"No data found for ligand '{ligand}' in {scope_name} for job {job_id}."
+             logger.warning(warning_msg)
+             warnings.append(warning_msg)
         else:
             logger.info(f"Found {len(ligand_data)} points for ligand '{ligand}' in {scope_name} for job {job_id}.")
             
         if not receptor_data:
-             logger.warning(f"No data found for receptor '{receptor}' in {scope_name} for job {job_id}.")
+             warning_msg = f"No data found for receptor '{receptor}' in {scope_name} for job {job_id}."
+             logger.warning(warning_msg)
+             warnings.append(warning_msg)
         else:
              logger.info(f"Found {len(receptor_data)} points for receptor '{receptor}' in {scope_name} for job {job_id}.")
 
-        # 5. Return in frontend format
-        logger.info(f"Returning visualization data for job {job_id}. Ligand points: {len(ligand_data)}, Receptor points: {len(receptor_data)}")
+        # 5. Return in frontend format including warnings
+        logger.info(f"Returning visualization data for job {job_id}. Ligand points: {len(ligand_data)}, Receptor points: {len(receptor_data)}, Warnings: {len(warnings)}")
         return {
             "ligand": ligand_data,
-            "receptor": receptor_data
+            "receptor": receptor_data,
+            "warnings": warnings # Include warnings in the response
         }
         
     except HTTPException as he:

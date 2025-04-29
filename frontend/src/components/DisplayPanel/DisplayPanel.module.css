@@ -42,10 +42,37 @@
 }
 
 .loading {
-    text-align: center;
-    padding: 10px;
+    /* text-align: center; */ /* Let container handle centering */
+    padding: 0; /* Remove padding if handled by container */
+    margin: 0 10px 0 0; /* Add some margin to the right of the text */
     color: #666;
     font-style: italic;
+}
+
+/* Container for loading text and cancel button */
+.loadingContainer {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px; /* Add padding here instead of on .loading */
+}
+
+/* Cancel Button Styling */
+.cancelButton {
+    margin-left: 10px; /* Space between text and button */
+    padding: 3px 8px;
+    font-size: 0.8em;
+    color: #d32f2f; /* Red color */
+    background-color: #ffebee;
+    border: 1px solid #ffcdd2;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s, border-color 0.2s;
+}
+
+.cancelButton:hover {
+    background-color: #ffcdd2;
+    border-color: #ef9a9a;
 }
 
 /* New Layout Styles */
@@ -71,6 +98,32 @@
     background: white;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     padding: 15px; /* Add some internal padding */
+}
+
+/* Warning Messages Styling */
+.warningsContainer {
+    background-color: #fffbe6; /* Light yellow background */
+    border: 1px solid #ffe58f; /* Yellow border */
+    color: #d46b08; /* Dark yellow/orange text */
+    padding: 10px 15px;
+    border-radius: 4px;
+    margin-bottom: 15px;
+    font-size: 0.9em;
+}
+
+.warningsContainer h4 {
+    margin-top: 0;
+    margin-bottom: 5px;
+    font-weight: 600;
+}
+
+.warningsContainer ul {
+    margin: 0;
+    padding-left: 20px;
+}
+
+.warningsContainer li {
+    margin-bottom: 3px;
 }
 
 /* --- REMOVE OLD/REDUNDANT TABLE STYLES --- */

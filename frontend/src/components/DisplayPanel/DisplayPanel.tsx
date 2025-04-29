@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import styles from './DisplayPanel.module.css';
 import SummaryStats from '../SummaryStats/SummaryStats';
 import PathwayDominanceTable from '../PathwayDominanceTable/PathwayDominanceTable';
@@ -37,6 +37,7 @@ interface VisualizationData {
     x: number;
     y: number;
   }[];
+  warnings?: string[]; // Optional warnings array
 }
 
 const DisplayPanel: React.FC<DisplayPanelProps> = ({
@@ -51,38 +52,90 @@ const DisplayPanel: React.FC<DisplayPanelProps> = ({
   const [selectedInteraction, setSelectedInteraction] = useState<BasicInteraction | null>(null);
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
   const [visualizationData, setVisualizationData] = useState<VisualizationData | null>(null);
+  const [vizWarnings, setVizWarnings] = useState<string[]>([]); // State for warnings
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // Ref to hold the AbortController for the current fetch request
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const fetchVisualizationData = async (ligand: string, receptor: string) => {
+    // Cancel any previous ongoing request before starting a new one
+    if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        console.log("[DisplayPanel] Aborted previous fetch request.");
+    }
+    
+    // Create a new AbortController for this request
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setLoading(true);
     setError(null);
-    setVisualizationData(null); // Clear previous visualization
+    setVisualizationData(null); 
+    setVizWarnings([]);
+
     if (!jobId || !selectedLayer) {
       setError('Missing job ID or selected layer for visualization.');
       setLoading(false);
+      abortControllerRef.current = null; // Clear controller if setup fails
       return;
     }
+
     try {
       const url = `http://localhost:8000/api/visualization/${jobId}?ligand=${encodeURIComponent(ligand)}&receptor=${encodeURIComponent(receptor)}&layer=${encodeURIComponent(selectedLayer)}`;
-      console.log(`[DisplayPanel] Fetching: ${url}`); // Add logging
-      const response = await fetch(url);
+      console.log(`[DisplayPanel] Fetching: ${url}`);
+      const response = await fetch(url, { 
+          signal: controller.signal // Pass the signal here
+      }); 
+
+      // Check if the request was aborted after starting the fetch but before response
+      if (controller.signal.aborted) {
+          console.log("[DisplayPanel] Fetch aborted after starting.");
+          // No need to set state here, finally block will handle loading
+          return;
+      }
+
       if (!response.ok) {
         const errMsg = await response.text();
-        console.error(`[DisplayPanel] Fetch error ${response.status}:`, errMsg); // Log error details
+        console.error(`[DisplayPanel] Fetch error ${response.status}:`, errMsg);
         throw new Error(errMsg || 'Failed to fetch visualization data');
       }
-      const data = await response.json();
-      console.log(`[DisplayPanel] Fetch success:`, data); // Log success data
+
+      const data: VisualizationData = await response.json();
+      console.log(`[DisplayPanel] Fetch success:`, data);
       setVisualizationData(data);
+      
+      if (data.warnings && data.warnings.length > 0) {
+          setVizWarnings(data.warnings);
+      }
+
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'An unknown error occurred';
-      console.error(`[DisplayPanel] Catch block error:`, message);
-      setError(message);
-      setVisualizationData(null); // Clear vis on error
+      if ((err as Error).name === 'AbortError') {
+          console.log("[DisplayPanel] Fetch request cancelled by user.");
+          // Don't set a generic error message for cancellations
+          setError('Request cancelled.'); // Optional: show a specific cancelled message
+      } else {
+          const message = err instanceof Error ? err.message : 'An unknown error occurred';
+          console.error(`[DisplayPanel] Catch block error:`, message);
+          setError(message);
+          setVizWarnings([]); // Clear warnings on fetch error too
+      }
+      setVisualizationData(null); // Clear potentially partial data on error/abort
     } finally {
+      // Ensure the controller associated with *this* request is cleared
+      // Check if the current controller in the ref is the one we just used
+      if (abortControllerRef.current === controller) {
+          abortControllerRef.current = null;
+      }
       setLoading(false);
     }
+  };
+
+  const handleCancelRequest = () => {
+      if (abortControllerRef.current) {
+          abortControllerRef.current.abort();
+      }
   };
 
   // Generic handler updated to accept index and set state
@@ -166,21 +219,44 @@ const DisplayPanel: React.FC<DisplayPanelProps> = ({
             </div>
             {showVisualization && (
                 <div className={styles.visualizationArea}> 
-                    {loading && <p className={styles.loading}>Loading visualization...</p>}
+                    {/* Display Warnings */} 
+                    {vizWarnings.length > 0 && (
+                        <div className={styles.warningsContainer}>
+                            <h4>Note:</h4>
+                            <ul>
+                                {vizWarnings.map((warning, index) => (
+                                    <li key={index}>{warning}</li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+
+                    {/* Loading indicator with Cancel button */} 
+                    {loading && (
+                        <div className={styles.loadingContainer}> 
+                            <p className={styles.loading}>Loading visualization...</p>
+                            <button onClick={handleCancelRequest} className={styles.cancelButton}>Cancel</button>
+                        </div>
+                    )}
                     {error && <p className={styles.error}>{error}</p>}
-                    {/* Render visualization only if data exists and an interaction was selected */}
-                    {visualizationData && selectedInteraction && (
+                    
+                    {/* Render visualization only if actual point data exists */} 
+                    {visualizationData && (visualizationData.ligand.length > 0 || visualizationData.receptor.length > 0) && selectedInteraction && (
                         <Visualization
                             data={visualizationData}
                             ligandName={selectedInteraction.ligand}
                             receptorName={selectedInteraction.receptor}
                         />
                     )}
-                     {/* Placeholder or message if no interaction selected */}
+                    
+                    {/* Improved Placeholder/Empty State Messages */}
                     {!loading && !error && !visualizationData && selectedInteraction && (
-                        <p className={styles.noData}>Visualization data loaded but is empty.</p>
+                         <p className={styles.noData}>Waiting for visualization data...</p> // Initial state before fetch finishes
                     )}
-                     {!loading && !error && !selectedInteraction && (
+                    {!loading && !error && visualizationData && visualizationData.ligand.length === 0 && visualizationData.receptor.length === 0 && selectedInteraction && vizWarnings.length === 0 && (
+                        <p className={styles.noData}>Visualization data loaded but is empty (no warnings received).</p> // Explicit empty state
+                    )}
+                    {!loading && !error && !selectedInteraction && (
                         <p className={styles.noData}>Click on a row in the table to visualize interaction.</p>
                     )}
                 </div>
