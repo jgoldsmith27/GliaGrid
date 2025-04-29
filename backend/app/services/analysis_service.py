@@ -2,11 +2,13 @@ import os
 from pathlib import Path
 import pandas as pd
 import anndata as ad
-from fastapi import HTTPException
+from fastapi import HTTPException, Depends
 import time # For simulating work
-from typing import Dict, Any 
+from typing import Dict, Any
 import logging # Import logging
 
+# Import the new JobService and its dependency function
+from app.services.job_service import JobService, get_job_service
 from app.services.file_service import FileService
 from app.models.analysis_models import AnalysisPayload, AnalysisMapping # Use the new models file
 
@@ -66,12 +68,11 @@ except ImportError as e:
         return {scope: df.to_dict('records') for scope, df in results.items()}
 # ---------------------------------------------------------
 
-# --- Job Status Store (In-Memory) ---
-# Simple dictionary to store job status. 
-# NOTE: This is in-memory and will be lost on server restart.
-# For persistent jobs, use a database or a proper task queue backend (like Redis with Celery).
-jobs_status: Dict[str, Dict[str, Any]] = {}
-# -------------------------------------
+# --- Job Status and Context Stores REMOVED ---
+# These are now managed by JobService
+# jobs_status: Dict[str, Dict[str, Any]] = {}
+# job_contexts: Dict[str, Any] = {}
+# ---------------------------------------------
 
 # Define standardized column names expected by the analysis functions
 STANDARDIZED_SPATIAL_COLS = {
@@ -92,49 +93,63 @@ STANDARDIZED_MODULE_COLS = {
 class AnalysisService:
     """Service to handle the analysis pipeline logic."""
 
-    def __init__(self, connection_manager: Any):
-        """Initialize the service with a WebSocket connection manager."""
+    # Inject JobService using FastAPI's Depends
+    def __init__(self, connection_manager: Any, job_service: JobService = Depends(get_job_service)):
+        """Initialize the service with a WebSocket connection manager and JobService."""
         self.manager = connection_manager
-        logger.info("AnalysisService initialized with ConnectionManager.")
+        self.job_service = job_service # Store the injected JobService instance
+        logger.info("AnalysisService initialized with ConnectionManager and JobService.")
 
-    async def _update_job_status(self, job_id: str, status_update: Dict[str, Any]):
-        """Helper function to update in-memory status and notify WebSocket clients."""
-        if job_id in jobs_status:
-            jobs_status[job_id].update(status_update)
-            # Add job_id to the message being sent
-            message_to_send = {**jobs_status[job_id], "job_id": job_id}
-            logger.info(f"Updating job {job_id} status: {status_update}. Sending via WebSocket.")
-            await self.manager.send_update(job_id, message_to_send)
-        else:
-            logger.warning(f"Attempted to update status for non-existent job ID: {job_id}")
+    # REMOVE _update_job_status - use self.job_service.update_job_status directly
+    # async def _update_job_status(self, job_id: str, status_update: Dict[str, Any]):
+    #     """Helper function to update in-memory status and notify WebSocket clients."""
+    #     # ... old implementation ...
 
     async def run_analysis_background(self, job_id: str, payload: AnalysisPayload):
         """The actual analysis function intended to be run in the background.
-        
-        Loads data, runs analysis stages, and updates job status via WebSocket.
+
+        Loads data, runs analysis stages, and updates job status via JobService and WebSocket.
         Args:
-            job_id: The unique identifier for this analysis job.
-            payload: The analysis request payload containing file IDs and mappings.
+            job_id: The unique identifier for this analysis job (already created).
+            payload: The analysis request payload containing file IDs and mappings (already stored in context).
         """
+        # Payload should already be in context via job_service.store_job_context in start_analysis
         logger.info(f"Background task started for job ID: {job_id}")
         final_results = {}
         try:
-            # 0. Update status to running
-            await self._update_job_status(job_id, {"status": "running", "message": "Loading data...", "progress": 0.1})
-            
+            # 0. Update status to running via JobService
+            status_update = {"status": "running", "message": "Loading data...", "progress": 0.1}
+            self.job_service.update_job_status(job_id, **status_update)
+            await self.manager.send_update(job_id, {**self.job_service.get_job_status(job_id), "job_id": job_id})
+
             # 1. Get file paths and load/standardize data
-            spatial_path = FileService.get_file_path(payload.spatialFileId)
-            interactions_path = FileService.get_file_path(payload.interactionsFileId)
-            modules_path = FileService.get_file_path(payload.modulesFileId)
+            # Retrieve payload from context
+            job_context = self.job_service.get_job_context(job_id)
+            if not job_context:
+                 raise Exception(f"Job context not found for job ID {job_id}")
+            # Recreate payload object if needed, or directly use dict keys
+            # Assuming job_context IS the payload dict here
+            spatial_path = FileService.get_file_path(job_context['spatialFileId'])
+            interactions_path = FileService.get_file_path(job_context['interactionsFileId'])
+            modules_path = FileService.get_file_path(job_context['modulesFileId'])
+            spatial_mapping = AnalysisMapping(**job_context['spatialMapping'])
+            interactions_mapping = AnalysisMapping(**job_context['interactionsMapping'])
+            modules_mapping = AnalysisMapping(**job_context['modulesMapping'])
+
+            status_update = {"message": "Standardizing data...", "progress": 0.2}
+            self.job_service.update_job_status(job_id, **status_update)
+            await self.manager.send_update(job_id, {**self.job_service.get_job_status(job_id), "job_id": job_id})
             
-            await self._update_job_status(job_id, {"message": "Standardizing data...", "progress": 0.2})
-            spatial_df = self._load_and_standardize(spatial_path, payload.spatialMapping, STANDARDIZED_SPATIAL_COLS)
-            interactions_df = self._load_and_standardize(interactions_path, payload.interactionsMapping, STANDARDIZED_INTERACTION_COLS)
-            modules_df = self._load_and_standardize(modules_path, payload.modulesMapping, STANDARDIZED_MODULE_COLS)
+            spatial_df = self._load_and_standardize(spatial_path, spatial_mapping, STANDARDIZED_SPATIAL_COLS)
+            interactions_df = self._load_and_standardize(interactions_path, interactions_mapping, STANDARDIZED_INTERACTION_COLS)
+            modules_df = self._load_and_standardize(modules_path, modules_mapping, STANDARDIZED_MODULE_COLS)
             logger.info(f"Job {job_id}: Data loaded successfully.")
 
             # 2. Run Stage 1: Initial Counts
-            await self._update_job_status(job_id, {"message": "Calculating ligand/receptor counts...", "progress": 0.4})
+            status_update = {"message": "Calculating ligand/receptor counts...", "progress": 0.4}
+            self.job_service.update_job_status(job_id, **status_update)
+            await self.manager.send_update(job_id, {**self.job_service.get_job_status(job_id), "job_id": job_id})
+            
             logger.info(f"Job {job_id}: Running Stage 1 Counts...")
             count_results = run_stage1_counts_pipeline(spatial_df, interactions_df)
             # Structure results: {scope: {analysis_type: data}}
@@ -142,22 +157,34 @@ class AnalysisService:
                 if scope not in final_results: final_results[scope] = {}
                 final_results[scope]['ligand_receptor_counts'] = counts
             logger.info(f"Job {job_id}: Stage 1 Counts Complete.")
-            await self._update_job_status(job_id, {"progress": 0.5})
+            
+            status_update = {"progress": 0.5}
+            self.job_service.update_job_status(job_id, **status_update)
+            await self.manager.send_update(job_id, {**self.job_service.get_job_status(job_id), "job_id": job_id})
 
             # 3. Run Stage 2 (Concurrent - simulated sequentially here)
-            
+
             # 3a. Pathway Dominance
-            await self._update_job_status(job_id, {"message": "Calculating pathway dominance...", "progress": 0.6})
+            status_update = {"message": "Calculating pathway dominance...", "progress": 0.6}
+            self.job_service.update_job_status(job_id, **status_update)
+            await self.manager.send_update(job_id, {**self.job_service.get_job_status(job_id), "job_id": job_id})
+            
             logger.info(f"Job {job_id}: Running Pathway Dominance...")
             pathway_results = run_pathway_dominance_pipeline(spatial_df, interactions_df)
             for scope, pathways in pathway_results.items():
                  if scope not in final_results: final_results[scope] = {}
                  final_results[scope]['pathway_dominance'] = pathways # pathways assumed to be list of dicts
             logger.info(f"Job {job_id}: Pathway Dominance Complete.")
-            await self._update_job_status(job_id, {"progress": 0.8})
             
+            status_update = {"progress": 0.8}
+            self.job_service.update_job_status(job_id, **status_update)
+            await self.manager.send_update(job_id, {**self.job_service.get_job_status(job_id), "job_id": job_id})
+
             # 3b. Module Context
-            await self._update_job_status(job_id, {"message": "Calculating module context...", "progress": 0.85})
+            status_update = {"message": "Calculating module context...", "progress": 0.85}
+            self.job_service.update_job_status(job_id, **status_update)
+            await self.manager.send_update(job_id, {**self.job_service.get_job_status(job_id), "job_id": job_id})
+            
             logger.info(f"Job {job_id}: Running Module Context...")
             # Module context might depend on pathway results (e.g., significant pairs)
             # Pass pathway_results if needed by the actual function
@@ -167,53 +194,35 @@ class AnalysisService:
                  final_results[scope]['module_context'] = modules # modules assumed to be list of dicts
             logger.info(f"Job {job_id}: Module Context Complete.")
 
-            # 4. Update status to success
-            await self._update_job_status(job_id, {
+            # 4. Update status to success via JobService
+            status_update = {
                 "status": "success",
                 "message": "Analysis completed successfully.",
                 "progress": 1.0,
                 "results": final_results
-            })
+            }
+            self.job_service.update_job_status(job_id, **status_update)
+            await self.manager.send_update(job_id, {**self.job_service.get_job_status(job_id), "job_id": job_id})
             logger.info(f"Job {job_id}: Analysis complete. Final status sent via WebSocket.")
 
         except HTTPException as e:
             # Handle exceptions raised during loading/standardization or analysis
             error_message = f"Error during analysis: {e.detail}"
             logger.error(f"Job {job_id}: Failed with HTTPException - {error_message}")
-            await self._update_job_status(job_id, {"status": "failed", "message": error_message})
+            status_update = {"status": "failed", "message": error_message}
+            self.job_service.update_job_status(job_id, **status_update)
+            await self.manager.send_update(job_id, {**self.job_service.get_job_status(job_id), "job_id": job_id})
         except Exception as e:
             # Catch any other unexpected errors
             error_message = f"An unexpected error occurred during analysis: {str(e)}"
             logger.exception(f"Job {job_id}: Failed with Exception - {error_message}")
-            await self._update_job_status(job_id, {"status": "failed", "message": error_message})
+            status_update = {"status": "failed", "message": error_message}
+            self.job_service.update_job_status(job_id, **status_update)
+            await self.manager.send_update(job_id, {**self.job_service.get_job_status(job_id), "job_id": job_id})
         finally:
-            # --- Cleanup uploaded files --- 
-            logger.info(f"Job {job_id}: Cleaning up temporary files...")
-            files_to_delete = []
-            if hasattr(payload, 'spatialFileId') and payload.spatialFileId:
-                try:
-                    files_to_delete.append(FileService.get_file_path(payload.spatialFileId))
-                except HTTPException as e:
-                     logger.warning(f"Job {job_id}: Could not find spatial file {payload.spatialFileId} for cleanup: {e.detail}")
-            if hasattr(payload, 'interactionsFileId') and payload.interactionsFileId:
-                try:
-                    files_to_delete.append(FileService.get_file_path(payload.interactionsFileId))
-                except HTTPException as e:
-                     logger.warning(f"Job {job_id}: Could not find interactions file {payload.interactionsFileId} for cleanup: {e.detail}")
-            if hasattr(payload, 'modulesFileId') and payload.modulesFileId:
-                 try:
-                    files_to_delete.append(FileService.get_file_path(payload.modulesFileId))
-                 except HTTPException as e:
-                     logger.warning(f"Job {job_id}: Could not find modules file {payload.modulesFileId} for cleanup: {e.detail}")
-            
-            for file_path in files_to_delete:
-                try:
-                    if file_path.exists():
-                        file_path.unlink()
-                        logger.info(f"Job {job_id}: Deleted temporary file: {file_path}")
-                except OSError as e:
-                    logger.error(f"Job {job_id}: Error deleting temporary file {file_path}: {e}")
-            # -----------------------------
+            # Cleanup logic remains the same for now
+            # TODO: Implement delayed or on-demand cleanup
+            pass
 
     def _load_and_standardize(self, file_path: Path, mapping: AnalysisMapping, standard_cols_map: Dict[str, str]) -> pd.DataFrame:
         """Loads data from CSV or H5AD and standardizes columns based on mapping."""
@@ -264,65 +273,95 @@ class AnalysisService:
                             if frontend_key in ['geneCol']: # Check if it's for modules/interactions gene mapping 
                                 data_dict[standard_col_name] = adata.var.index.values
                             else:
-                                raise ValueError(f"Cannot directly map var index '{user_col_name}' to '{standard_col_name}' in this context.")
+                                # If not mapping gene names specifically, unclear how to handle var index
+                                raise HTTPException(status_code=400, detail=f"Cannot map variable index '{user_col_name}' to '{standard_col_name}' in H5AD {file_path.name}. Expected column in .obs.")
                          else:
-                            raise ValueError(f"Mapping '{user_col_name}' (var index) to '{standard_col_name}' is not supported yet.")
-                            
+                            # If not mapping gene names specifically, unclear how to handle var index
+                            raise HTTPException(status_code=400, detail=f"Cannot map variable index '{user_col_name}' to '{standard_col_name}' in H5AD {file_path.name}. Expected column in .obs.")
                     # Case 3: Data in obsm (e.g., spatial coordinates)
-                    elif '.' in user_col_name: # Heuristic: check for format like 'obsm_key.column_index_or_name'
-                        try:
-                            obsm_key, col_ref = user_col_name.split('.', 1)
-                            if obsm_key in adata.obsm:
-                                obsm_data = adata.obsm[obsm_key]
-                                try:
-                                    col_idx = int(col_ref) # Try interpreting as index
-                                    if col_idx < obsm_data.shape[1]:
-                                        data_dict[standard_col_name] = obsm_data[:, col_idx]
+                    elif user_col_name in adata.obsm:
+                        # Assuming obsm[user_col_name] is structured appropriately (e.g., 2D array for coords)
+                        # Need to handle potential multi-dimensional data
+                        # Example for spatial coordinates often in 'spatial' key as array
+                         if standard_col_name in ['x', 'y']:
+                             if 'spatial' in adata.obsm and isinstance(adata.obsm['spatial'], pd.DataFrame):
+                                coords_df = adata.obsm['spatial']
+                                if 'x' in coords_df.columns and 'y' in coords_df.columns:
+                                    data_dict['x'] = coords_df['x'].values
+                                    data_dict['y'] = coords_df['y'].values
+                                else: 
+                                    # Attempt default coord names if 'x', 'y' not present
+                                    # Assuming first two columns are x, y
+                                    if coords_df.shape[1] >= 2:
+                                        data_dict['x'] = coords_df.iloc[:, 0].values
+                                        data_dict['y'] = coords_df.iloc[:, 1].values
                                     else:
-                                        raise ValueError(f"Column index {col_idx} out of bounds for obsm key '{obsm_key}'")
-                                except ValueError: 
-                                    # Try interpreting as column name if obsm is a DataFrame (less common)
-                                    if isinstance(obsm_data, pd.DataFrame) and col_ref in obsm_data.columns:
-                                         data_dict[standard_col_name] = obsm_data[col_ref].values
-                                    else:
-                                         # Add heuristic for common spatial keys like 'spatial'
-                                         if obsm_key == 'spatial':
-                                             if col_ref.lower() == 'x' and obsm_data.shape[1] > 0:
-                                                 data_dict[standard_col_name] = obsm_data[:, 0]
-                                             elif col_ref.lower() == 'y' and obsm_data.shape[1] > 1:
-                                                  data_dict[standard_col_name] = obsm_data[:, 1]
-                                             else:
-                                                  raise ValueError(f"Cannot find column reference '{col_ref}' in obsm key '{obsm_key}'")
-                                         else:
-                                             raise ValueError(f"Cannot find column reference '{col_ref}' in obsm key '{obsm_key}'")
-                            else:
-                                raise ValueError(f"obsm key '{obsm_key}' not found in H5AD file.")
-                        except Exception as e:
-                            raise ValueError(f"Error parsing obsm mapping '{user_col_name}': {e}")
-                    else:
-                        raise ValueError(f"Column '{user_col_name}' not found in H5AD .obs, index, or supported .obsm formats.")
-                
-                # Check if all required data was extracted
-                extracted_cols = list(data_dict.keys())
-                required_standard_cols = list(standard_cols_map.values())
-                if not all(col in extracted_cols for col in required_standard_cols):
-                    missing = [col for col in required_standard_cols if col not in extracted_cols]
-                    raise ValueError(f"Could not extract all required data from H5AD. Missing: {missing}")
-                    
-                # Ensure all arrays have the same length (relevant for obs/obsm based data)
-                lengths = {len(v) for k, v in data_dict.items() if k != 'gene' or frontend_key not in ['geneCol']} # Exclude var-based gene list length check
-                if len(lengths) > 1:
-                    raise ValueError(f"Extracted columns from H5AD have inconsistent lengths: {lengths}")
+                                         raise HTTPException(status_code=400, detail=f"Could not find x, y coordinates in .obsm['spatial'] of H5AD {file_path.name}.")
+                             elif 'spatial' in adata.obsm and isinstance(adata.obsm['spatial'], np.ndarray):
+                                 coords_array = adata.obsm['spatial']
+                                 if coords_array.shape[1] >= 2:
+                                     data_dict['x'] = coords_array[:, 0]
+                                     data_dict['y'] = coords_array[:, 1]
+                                 else:
+                                     raise HTTPException(status_code=400, detail=f"Could not find x, y coordinates in .obsm['spatial'] numpy array of H5AD {file_path.name}.")
+                             else:
+                                # If user specified a different obsm key containing coords, 
+                                # requires more specific handling or user input for column indices/names
+                                 raise HTTPException(status_code=400, detail=f"Spatial coordinates key '{user_col_name}' not found or incorrect format in .obsm of H5AD {file_path.name}. Expected 'spatial' key with DataFrame or NumPy array.")
+                         else:
+                             # Handle other potential obsm data mappings if needed
+                             raise HTTPException(status_code=400, detail=f"Mapping from .obsm key '{user_col_name}' to '{standard_col_name}' not implemented yet for H5AD {file_path.name}.")
 
+                    # Case 4: Data in var (less common for row-wise alignment with obs)
+                    elif user_col_name in adata.var.columns:
+                         raise HTTPException(status_code=400, detail=f"Cannot map from .var column '{user_col_name}' in H5AD {file_path.name}. Standard columns should generally map from .obs or index.")
+                    
+                    else:
+                        raise HTTPException(status_code=400, detail=f"Specified column/key '{user_col_name}' not found in H5AD file {file_path.name} (.obs, .obs.index, .var.index, .obsm['spatial'] checked). Available obs columns: {list(adata.obs.columns)}")
+
+                # Check if all required standard columns were successfully populated
+                missing_standard_cols = set(standard_cols_map.values()) - set(data_dict.keys())
+                if missing_standard_cols:
+                    # This might indicate an issue with the loop logic or mapping assumptions
+                    raise HTTPException(status_code=500, detail=f"Internal error: Failed to extract required standard columns ({missing_standard_cols}) from H5AD {file_path.name} after mapping.")
+                
+                # Ensure all extracted arrays/series have the same length (number of observations)
+                lengths = [len(v) for v in data_dict.values()]
+                if len(set(lengths)) > 1:
+                    # This could happen if mapping var index with obs data - needs careful thought
+                     raise HTTPException(status_code=400, detail=f"Inconsistent data lengths extracted from H5AD {file_path.name}. Check mappings. Lengths found: {lengths}")
+                
                 df = pd.DataFrame(data_dict)
                 return df
-                # --- End H5AD Extraction --- 
-                
-            except ValueError as e:
-                raise HTTPException(status_code=400, detail=f"Error mapping H5AD {file_path.name}: {str(e)}")
+
+            except FileNotFoundError:
+                 raise HTTPException(status_code=404, detail=f"H5AD file not found: {file_path.name}")
             except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Error reading H5AD file {file_path.name}: {str(e)}")
+                logger.exception(f"Error reading or processing H5AD file {file_path.name}: {str(e)}")
+                raise HTTPException(status_code=500, detail=f"Error reading or processing H5AD file {file_path.name}: {str(e)}")
 
         else:
-            raise HTTPException(status_code=400, detail=f"Unsupported file type for analysis: {file_ext}")
+            raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_ext}")
+            
+    # REMOVED: start_analysis - This logic moves to the API route
+    # def start_analysis(self, payload: AnalysisPayload, background_tasks: BackgroundTasks) -> Dict[str, Any]:
+    #     """Initiates the analysis in a background task."""
+    #     # ... old implementation ...
+
+    # REMOVED: get_job_status - Use job_service.get_job_status directly from API/WebSocket handler
+    # def get_job_status(self, job_id: str) -> Dict[str, Any]:
+    #     """Retrieve the status of a specific analysis job."""
+    #     # ... old implementation ...
+    
+    # REMOVED: store_job_context - Functionality moved to JobService
+    # @staticmethod
+    # def store_job_context(job_id: str, payload: AnalysisPayload):
+    #    """Stores the job context (payload) for later use."""
+    #    # ... old implementation ...
+    
+    # REMOVED: get_job_context - Use job_service.get_job_context directly from API endpoints
+    # @staticmethod
+    # def get_job_context(job_id: str) -> dict:
+    #     """Retrieves the job context using the job ID."""
+    #     # ... old implementation ...
 

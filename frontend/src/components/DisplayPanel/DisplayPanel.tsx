@@ -15,6 +15,8 @@ interface DisplayPanelProps {
   data: any; // Data will vary based on analysis type
   scope: ScopeType;
   layers: string[]; // Selected layers if scope is 'layers'
+  jobId: string;
+  selectedLayer: string;
 }
 
 interface VisualizationData {
@@ -32,7 +34,9 @@ const DisplayPanel: React.FC<DisplayPanelProps> = ({
   analysisType,
   data,
   scope,
-  layers
+  layers,
+  jobId,
+  selectedLayer
 }) => {
   const [selectedInteraction, setSelectedInteraction] = useState<PathwayDominanceResult | null>(null);
   const [visualizationData, setVisualizationData] = useState<VisualizationData | null>(null);
@@ -42,10 +46,17 @@ const DisplayPanel: React.FC<DisplayPanelProps> = ({
   const fetchVisualizationData = async (ligand: string, receptor: string) => {
     setLoading(true);
     setError(null);
+    if (!jobId || !selectedLayer) {
+      setError('Missing job ID or selected layer for visualization.');
+      setLoading(false);
+      return;
+    }
     try {
-      const response = await fetch(`http://localhost:8000/api/visualization/${ligand}/${receptor}`);
+      const url = `http://localhost:8000/api/visualization/${jobId}?ligand=${encodeURIComponent(ligand)}&receptor=${encodeURIComponent(receptor)}&layer=${encodeURIComponent(selectedLayer)}`;
+      const response = await fetch(url);
       if (!response.ok) {
-        throw new Error('Failed to fetch visualization data');
+        const errMsg = await response.text();
+        throw new Error(errMsg || 'Failed to fetch visualization data');
       }
       const data = await response.json();
       setVisualizationData(data);

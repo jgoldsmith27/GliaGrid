@@ -223,6 +223,8 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
                   data={displayData}
                   scope={selectedScope}
                   layers={selectedLayers}
+                  jobId={jobId || ''}
+                  selectedLayer={selectedScope === 'layers' && selectedLayers.length > 0 ? selectedLayers[0] : 'whole_tissue'}
               />
           </div>
           {/* Optional Comparison Panel - can add later */}

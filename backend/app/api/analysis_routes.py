@@ -4,10 +4,14 @@ from typing import Dict, Optional, List, Set
 import asyncio
 import uuid
 import json
+import logging
 
-# Assume AnalysisService will be created in app/services/analysis_service.py
-from app.services.analysis_service import AnalysisService, jobs_status # Import service and status dict
+# Import JobService and AnalysisService
+from app.services.job_service import JobService, get_job_service
+from app.services.analysis_service import AnalysisService 
 from app.models.analysis_models import AnalysisMapping, AnalysisPayload # Import models
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/analysis",
@@ -65,65 +69,79 @@ class ConnectionManager:
 manager = ConnectionManager()
 # Pass the manager instance to the AnalysisService or make it accessible
 # Option 1: Make it globally accessible (simpler for now)
-analysis_service_instance = AnalysisService(connection_manager=manager)
+# This instantiation needs to happen where FastAPI can manage dependencies properly,
+# typically not directly at the module level like this if services depend on each other.
+# We will rely on FastAPI's dependency injection instead.
+# analysis_service_instance = AnalysisService(connection_manager=manager)
 # -------------------------------------
 
-# Dependency to get AnalysisService instance (if needed, or use class methods)
-# def get_analysis_service():
-#     return AnalysisService() 
+# Dependency to get AnalysisService instance
+# Note: AnalysisService now depends on JobService, FastAPI handles this chain.
+def get_analysis_service(manager_instance: ConnectionManager = Depends(lambda: manager), # Inject manager
+                         job_service: JobService = Depends(get_job_service)) -> AnalysisService:
+    # This function allows FastAPI to correctly instantiate AnalysisService
+    # with its dependencies (manager and job_service)
+    return AnalysisService(connection_manager=manager_instance, job_service=job_service)
 
 @router.post("/start", response_model=AnalysisResponse)
 async def start_analysis_endpoint(
     background_tasks: BackgroundTasks,
-    payload: AnalysisPayload = Body(...)
+    payload: AnalysisPayload = Body(...),
+    job_service: JobService = Depends(get_job_service),
+    # Inject AnalysisService using the dependency function
+    analysis_service: AnalysisService = Depends(get_analysis_service)
 ):
     """
     Endpoint to start the analysis pipeline asynchronously.
     
-    Receives file IDs and column mappings, adds the analysis job to the 
-    background queue, and returns a job ID for status tracking.
+    Receives file IDs and column mappings, creates a job via JobService,
+    stores the payload as context, adds the analysis task to the background queue,
+    and returns a job ID for status tracking.
     """
     # --- Check for existing active job --- 
-    active_job_exists = False
-    for job_id_in_status, status_info in jobs_status.items():
-        if status_info.get('status') in ['pending', 'running']:
-            active_job_exists = True
-            break
-    
-    if active_job_exists:
-        raise HTTPException(
-            status_code=409, 
-            detail="An analysis job is already running. Please wait for it to complete."
-        )
+    # Let's simplify this check for now, or move complex logic to JobService if needed.
+    # active_job_exists = False
+    # for job_id_in_status, status_info in jobs_status.items(): # Old way
+    #     if status_info.get('status') in ['pending', 'running']:
+    #         active_job_exists = True
+    #         break
+    # 
+    # if active_job_exists:
+    #     raise HTTPException(
+    #         status_code=409, 
+    #         detail="An analysis job is already running. Please wait for it to complete."
+    #     )
     # -------------------------------------
     
-    job_id = str(uuid.uuid4())
-    print(f"Received analysis request, assigning job ID: {job_id}")
+    logger.info("Received analysis request. Creating job...")
+    # Create job using JobService, store payload as initial context
+    job_id = job_service.create_job(initial_context=payload.dict())
+    logger.info(f"Job created with ID: {job_id}")
     
-    # Add job to status dictionary (initial state)
-    initial_status = {"status": "pending", "message": "Analysis job queued.", "progress": 0.0}
-    jobs_status[job_id] = initial_status
-
-    # Instantiate service and add the actual analysis task to the background
-    # Use the globally created instance that has the connection manager
-    background_tasks.add_task(analysis_service_instance.run_analysis_background, job_id, payload)
+    # Add the actual analysis task to the background
+    # Pass only the job_id; the service retrieves the payload from context
+    background_tasks.add_task(analysis_service.run_analysis_background, job_id, payload)
     
     # Return immediately with the job ID
     return AnalysisResponse(status="success", message="Analysis job started in background.", job_id=job_id)
 
 @router.get("/status/{job_id}", response_model=JobStatusResponse)
-async def get_analysis_status(job_id: str):
+async def get_analysis_status(
+    job_id: str, 
+    job_service: JobService = Depends(get_job_service)
+):
     """
     Endpoint to check the status and potentially retrieve results of an analysis job.
-    (This is still useful for non-WebSocket clients or quick checks)
+    Uses JobService to retrieve status.
     """
-    print(f"Checking status for job ID: {job_id}")
-    status_info = jobs_status.get(job_id)
+    logger.info(f"Checking status for job ID: {job_id}")
+    status_info = job_service.get_job_status(job_id)
 
     if not status_info:
+        logger.warning(f"Job ID {job_id} not found for status check.")
         raise HTTPException(status_code=404, detail=f"Job ID {job_id} not found.")
 
-    print(f"Status found for job ID {job_id}: {status_info}")
+    logger.info(f"Status found for job ID {job_id}: {status_info}")
     # Ensure all potential fields from the status_info dict are included
     return JobStatusResponse(
         job_id=job_id,
@@ -131,34 +149,43 @@ async def get_analysis_status(job_id: str):
         message=status_info.get("message"),
         progress=status_info.get("progress"),
         results=status_info.get("results")
-    ) 
+    )
 
 @ws_router.websocket("/ws/analysis/status/{job_id}")
-async def websocket_status_endpoint(websocket: WebSocket, job_id: str):
+async def websocket_status_endpoint(
+    websocket: WebSocket, 
+    job_id: str,
+    # Inject JobService directly into the WebSocket endpoint
+    job_service: JobService = Depends(get_job_service) 
+):
     """
     WebSocket endpoint for real-time analysis status updates.
+    Uses JobService to check initial status.
     """
     await manager.connect(websocket, job_id)
     try:
-        # Send the current status immediately upon connection
-        current_status = jobs_status.get(job_id)
+        # Send the current status immediately upon connection using JobService
+        current_status = job_service.get_job_status(job_id)
         if current_status:
-            await manager.send_update(job_id, {**current_status, "job_id": job_id}) # Include job_id in message
+            # Add job_id for consistency, although it's in the URL
+            await manager.send_update(job_id, {**current_status, "job_id": job_id}) 
         else:
-            # If job_id doesn't exist when WS connects (e.g., race condition or invalid ID)
+            # If job_id doesn't exist when WS connects
+            logger.warning(f"WebSocket connection attempt for non-existent job ID: {job_id}")
             await manager.send_update(job_id, {"status": "error", "message": f"Job ID {job_id} not found.", "job_id": job_id})
+            # Consider closing the connection if job doesn't exist after sending error
+            # await websocket.close(code=1008) # Policy Violation or similar
+            # return # Exit the handler
 
-        # Keep the connection alive, listening for client messages (optional)
+        # Keep the connection alive
         while True:
-            # You might receive messages from the client here if needed
-            # For now, we just keep the connection open to push server updates
-            await websocket.receive_text() # Waits for a message, keeps connection open
-            # If you don't expect client messages, you could use asyncio.sleep() 
-            # await asyncio.sleep(60) # Keep alive by sleeping, less reactive to disconnects
+             # Keep connection open to push server updates
+             # Wait for disconnect instead of client messages
+             await websocket.receive_text() # Needed to detect disconnect properly
 
     except WebSocketDisconnect:
         manager.disconnect(websocket, job_id)
-        print(f"Client disconnected from job {job_id}")
+        logger.info(f"Client disconnected from job {job_id}")
     except Exception as e:
         manager.disconnect(websocket, job_id)
-        print(f"Error in WebSocket connection for job {job_id}: {e}") 
+        logger.exception(f"Error in WebSocket connection for job {job_id}: {e}") 

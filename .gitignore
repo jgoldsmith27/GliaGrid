@@ -29,4 +29,8 @@ logs
 *.ntvs*
 *.njsproj
 *.sln
-*.sw? 
+*.sw?
+
+# Data files
+*.csv
+*.h5ad 
