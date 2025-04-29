@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { ScatterplotLayer } from '@deck.gl/layers';
-import { ScreenGridLayer } from '@deck.gl/aggregation-layers';
+import { ScreenGridLayer, HeatmapLayer, HexagonLayer } from '@deck.gl/aggregation-layers';
 import DeckGL from '@deck.gl/react';
-import { OrthographicView, OrthographicViewState, ViewStateChangeParameters } from '@deck.gl/core';
+import { OrthographicView, OrthographicViewState, ViewStateChangeParameters, Color } from '@deck.gl/core';
 import styles from './Visualization.module.css';
 
 interface Point {
@@ -55,15 +55,17 @@ const getInitialViewState = (ligandData: Point[], receptorData: Point[]) => {
     };
 };
 
-// --- Add Heatmap Type Definition ---
-type HeatmapType = 'None' | 'Ligand' | 'Receptor';
+// --- Type Definitions ---
+type DensityScoringType = 'Off' | 'Ligand' | 'Receptor';
+type AggregationLayerType = 'ScreenGrid' | 'Hexagon' | 'Heatmap';
+type PointsDisplayType = 'off' | 'ligands' | 'receptors' | 'both';
 
 const Visualization: React.FC<VisualizationProps> = ({ data, ligandName, receptorName, currentScope }) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
-  // --- Add State for Heatmap Type ---
-  const [heatmapType, setHeatmapType] = useState<HeatmapType>('None'); 
-  // --- Add State for Scatter Plot Visibility ---
-  const [showScatterPlot, setShowScatterPlot] = useState(true);
+  // --- Visualization Control States ---
+  const [densityScoringType, setDensityScoringType] = useState<DensityScoringType>('Off'); 
+  const [aggregationLayerType, setAggregationLayerType] = useState<AggregationLayerType>('ScreenGrid');
+  const [pointsDisplayType, setPointsDisplayType] = useState<PointsDisplayType>('both');
 
   // Calculate initial view state memoized based on data
   const initialViewState = useMemo(() => {
@@ -134,76 +136,119 @@ const Visualization: React.FC<VisualizationProps> = ({ data, ligandName, recepto
       }),
     ];
 
-    console.log(`[Visualization Layers] heatmapType: ${heatmapType}, Ligands: ${data.ligand?.length || 0}, Receptors: ${data.receptor?.length || 0}`);
+    console.log(`[Visualization Layers] heatmapType: ${densityScoringType}, Ligands: ${data.ligand?.length || 0}, Receptors: ${data.receptor?.length || 0}`);
 
-    let heatmapLayer = null;
-    // Revert variable name slightly for clarity, still using ScreenGridLayer
-    let typedAggregationLayer: ScreenGridLayer<Point> | null = null; 
-    // --- Temporarily remove specific heatmap config for debugging ---
-    const gridCellSizePixels = 20; // Cell size for ScreenGridLayer
+    // Use a more generic name to hold either ScreenGrid, Hexagon or Heatmap layer
+    let aggregationLayer: ScreenGridLayer<Point> | HeatmapLayer<Point> | HexagonLayer<Point> | null = null;
 
-    if (heatmapType === 'Ligand' && data.ligand.length > 0) {
-      console.log(`[Visualization Layers] Creating Ligand ScreenGridLayer with ${data.ligand.length} points`);
-      typedAggregationLayer = new ScreenGridLayer<Point>({ 
-        id: 'ligand-screengrid-layer',
-        data: data.ligand,
-        getPosition: (d: Point) => [d.x, d.y],
-        getWeight: 1, // Use uniform weight for now
-        cellSizePixels: gridCellSizePixels,
-        colorRange: [ // Use a similar Yellow -> Red range for now
-          [255, 255, 178, 0], // Alpha 0 for lowest value
-          [254, 204, 92, 64],
-          [253, 141, 60, 128],
-          [240, 59, 32, 192],
-          [189, 0, 38, 255]  // Alpha 255 for highest value
-        ],
-        gpuAggregation: false,
-        aggregation: 'SUM' // Aggregate by sum of weights (or COUNT)
-      });
-    } else if (heatmapType === 'Receptor' && data.receptor.length > 0) {
-      console.log(`[Visualization Layers] Creating Receptor ScreenGridLayer with ${data.receptor.length} points`);
-      typedAggregationLayer = new ScreenGridLayer<Point>({ 
-        id: 'receptor-screengrid-layer',
-        data: data.receptor,
-        getPosition: (d: Point) => [d.x, d.y],
-        getWeight: 1,
-        cellSizePixels: gridCellSizePixels,
-        colorRange: [ // Use a similar Light Blue -> Dark Blue range
+    // Configuration for layers
+    const gridCellSizePixels = 20; 
+    const hexagonRadius = 15;      // Radius for HexagonLayer
+    const hexagonCoverage = 0.9;   // Coverage for HexagonLayer (0-1)
+    const heatmapRadiusPixels = 40; 
+    const heatmapIntensity = 1;    
+    const heatmapThreshold = 0.05; 
+
+    // 1. Determine data source for aggregation based on Density Scoring
+    let layerData: Point[] | null = null;
+    let layerIdPrefix = '';
+    if (densityScoringType === 'Ligand') {
+        layerData = data.ligand;
+        layerIdPrefix = 'ligand';
+    } else if (densityScoringType === 'Receptor') {
+        layerData = data.receptor;
+        layerIdPrefix = 'receptor';
+    }
+
+    // 2. Create the selected aggregation layer if scoring is enabled
+    if (layerData && layerData.length > 0) { // Check if layerData is not null and has points
+      const commonProps = {
+          data: layerData,
+          getPosition: (d: Point) => [d.x, d.y] as [number, number],
+          getWeight: 1,
+          pickable: false, // Aggregation layers usually aren't pickable
+      };
+      const colorRange = densityScoringType === 'Receptor' ? [
           [237, 248, 251, 0],
           [179, 205, 227, 64],
           [140, 150, 198, 128],
           [136, 86, 167, 192],
           [129, 15, 124, 255]
-        ],
-        gpuAggregation: false,
-        aggregation: 'SUM'
-      });
+      ] : [
+          [255, 255, 178, 0],
+          [254, 204, 92, 64],
+          [253, 141, 60, 128],
+          [240, 59, 32, 192],
+          [189, 0, 38, 255]
+      ];
+       const heatmapColorRange = densityScoringType === 'Receptor' ? [
+                [179, 205, 227, 64],
+                [140, 150, 198, 128],
+                [136, 86, 167, 192],
+                [129, 15, 124, 255]
+            ] : [
+                [254, 204, 92, 64],
+                [253, 141, 60, 128],
+                [240, 59, 32, 192],
+                [189, 0, 38, 255]
+            ];
+
+      if (aggregationLayerType === 'ScreenGrid') {
+          console.log(`[Visualization Layers] Creating ${layerIdPrefix} ScreenGridLayer`);
+          aggregationLayer = new ScreenGridLayer<Point>({ 
+            ...commonProps,
+            id: `${layerIdPrefix}-screengrid-layer`, 
+            cellSizePixels: gridCellSizePixels,
+            colorRange: colorRange as Color[],
+            gpuAggregation: false,
+            aggregation: 'SUM' 
+          });
+      } else if (aggregationLayerType === 'Hexagon') {
+          console.log(`[Visualization Layers] Creating ${layerIdPrefix} HexagonLayer`);
+          aggregationLayer = new HexagonLayer<Point>({
+              ...commonProps,
+              id: `${layerIdPrefix}-hexagon-layer`,
+              radius: hexagonRadius,
+              coverage: hexagonCoverage,
+              colorRange: colorRange as Color[],
+              // extruded: false, // Default
+              // elevationScale: 1, // Default
+          });
+      } else { // aggregationLayerType === 'Heatmap'
+          console.log(`[Visualization Layers] Creating ${layerIdPrefix} HeatmapLayer`);
+          aggregationLayer = new HeatmapLayer<Point>({
+            ...commonProps,
+            id: `${layerIdPrefix}-heatmap-layer`,
+            radiusPixels: heatmapRadiusPixels,
+            intensity: heatmapIntensity,
+            threshold: heatmapThreshold,
+            colorRange: heatmapColorRange as Color[],
+            aggregation: 'SUM' 
+          });
+      }
     }
 
-    // Conditionally include base layers based on showScatterPlot state
-    const layersToShow = [];
-    if (typedAggregationLayer) {
-      layersToShow.push(typedAggregationLayer);
+    // 3. Determine which scatter plot layers to show based on Points Display
+    const scatterLayersToShow = [];
+    if (pointsDisplayType === 'ligands' || pointsDisplayType === 'both') {
+        if (data.ligand.length > 0) scatterLayersToShow.push(baseLayers[0]); // Ligand layer
     }
-    if (showScatterPlot) {
-      layersToShow.push(...baseLayers);
-    } else if (!typedAggregationLayer) {
-        // If heatmap is off AND showScatterPlot is false, still show base layers? 
-        // Or maybe just show nothing? Let's show baseLayers for now if heatmap is off.
-        // This case might need refinement based on desired behavior when heatmap is None and toggle is off.
-        // For now, if heatmap is None, always show base layers regardless of toggle.
-       if (heatmapType === 'None') {
-           layersToShow.push(...baseLayers);
-       } 
+    if (pointsDisplayType === 'receptors' || pointsDisplayType === 'both') {
+        if (data.receptor.length > 0) scatterLayersToShow.push(baseLayers[1]); // Receptor layer
     }
-    
-    const finalLayers = layersToShow;
+
+    // 4. Combine aggregation and scatter plot layers
+    const finalLayers = [];
+    if (aggregationLayer) {
+      finalLayers.push(aggregationLayer); // Add aggregation layer first (render underneath)
+    }
+    finalLayers.push(...scatterLayersToShow); // Add scatter layers on top
+
     console.log('[Visualization Layers] Final layers array:', finalLayers.map(l => l?.id)); // Log layer IDs
 
-    // Add aggregation layer *before* scatterplots so it's underneath
     return finalLayers;
 
-  }, [data.ligand, data.receptor, heatmapType, showScatterPlot]); // Dependencies for useMemo
+  }, [data.ligand, data.receptor, densityScoringType, pointsDisplayType, aggregationLayerType]); // Dependencies for useMemo
 
   const toggleFullscreen = () => {
     setIsFullscreen(!isFullscreen);
@@ -243,40 +288,72 @@ const Visualization: React.FC<VisualizationProps> = ({ data, ligandName, recepto
             </div>
             {/* --- Updated Legend Area --- */}
             <div className={styles.legendContainer}>
-                {/* Scatterplot Legend */}
-                <div className={styles.legendItem}>
-                    <div className={styles.legendColor} style={{ backgroundColor: 'red' }} />
-                    <span>{ligandName}</span>
-                </div>
-                <div className={styles.legendItem}>
-                    <div className={styles.legendColor} style={{ backgroundColor: 'blue' }} />
-                    <span>{receptorName}</span>
-                </div>
-                {/* Heatmap Selection */}
-                <div className={styles.heatmapSelector}>
-                    <span className={styles.heatmapLabel}>Heatmap:</span>
+                {/* Scatterplot Legend (maybe hide if points are off?) */}
+                {(pointsDisplayType === 'ligands' || pointsDisplayType === 'both') && (
+                    <div className={styles.legendItem}>
+                        <div className={styles.legendColor} style={{ backgroundColor: 'red' }} />
+                        <span>{ligandName}</span>
+                    </div>
+                )}
+                {(pointsDisplayType === 'receptors' || pointsDisplayType === 'both') && (
+                    <div className={styles.legendItem}>
+                        <div className={styles.legendColor} style={{ backgroundColor: 'blue' }} />
+                        <span>{receptorName}</span>
+                    </div>
+                )}
+
+                {/* --- Density Scoring Selector --- */}
+                <div className={styles.controlGroup}>
+                    <span className={styles.controlLabel}>Density Scoring:</span>
                     <label>
-                        <input type="radio" name="heatmapType" value="None" checked={heatmapType === 'None'} onChange={() => setHeatmapType('None')} />
+                        <input type="radio" name="densityScoring" value="Off" checked={densityScoringType === 'Off'} onChange={() => setDensityScoringType('Off')} />
                         Off
                     </label>
                     <label>
-                        <input type="radio" name="heatmapType" value="Ligand" checked={heatmapType === 'Ligand'} onChange={() => setHeatmapType('Ligand')} disabled={data.ligand.length === 0} />
+                        <input type="radio" name="densityScoring" value="Ligand" checked={densityScoringType === 'Ligand'} onChange={() => setDensityScoringType('Ligand')} disabled={data.ligand.length === 0} />
                         Ligand Density
                     </label>
                     <label>
-                        <input type="radio" name="heatmapType" value="Receptor" checked={heatmapType === 'Receptor'} onChange={() => setHeatmapType('Receptor')} disabled={data.receptor.length === 0} />
+                        <input type="radio" name="densityScoring" value="Receptor" checked={densityScoringType === 'Receptor'} onChange={() => setDensityScoringType('Receptor')} disabled={data.receptor.length === 0} />
                         Receptor Density
                     </label>
                 </div>
-                {/* --- Add Scatter Plot Toggle --- */}
-                <div className={styles.scatterToggle}>
+
+                {/* --- Aggregation Type Selector --- */}
+                <div className={styles.controlGroup} > {/* Disable if scoring is Off */} 
+                     <span className={styles.controlLabel}>Density Style:</span>
                     <label>
-                        <input 
-                            type="checkbox" 
-                            checked={showScatterPlot} 
-                            onChange={(e) => setShowScatterPlot(e.target.checked)} 
-                        />
-                        Show Points
+                        <input type="radio" name="aggType" value="ScreenGrid" checked={aggregationLayerType === 'ScreenGrid'} onChange={() => setAggregationLayerType('ScreenGrid')} disabled={densityScoringType === 'Off'} />
+                        Grid
+                    </label>
+                     <label>
+                        <input type="radio" name="aggType" value="Hexagon" checked={aggregationLayerType === 'Hexagon'} onChange={() => setAggregationLayerType('Hexagon')} disabled={densityScoringType === 'Off'} />
+                        Hexagon
+                    </label>
+                    <label>
+                        <input type="radio" name="aggType" value="Heatmap" checked={aggregationLayerType === 'Heatmap'} onChange={() => setAggregationLayerType('Heatmap')} disabled={densityScoringType === 'Off'} />
+                        Heatmap
+                    </label>
+                </div>
+
+                 {/* --- Points Display Selector --- */}
+                <div className={styles.controlGroup}>
+                    <span className={styles.controlLabel}>Points:</span>
+                    <label>
+                        <input type="radio" name="pointsDisplay" value="off" checked={pointsDisplayType === 'off'} onChange={() => setPointsDisplayType('off')} />
+                        Off
+                    </label>
+                     <label>
+                        <input type="radio" name="pointsDisplay" value="ligands" checked={pointsDisplayType === 'ligands'} onChange={() => setPointsDisplayType('ligands')} disabled={data.ligand.length === 0} />
+                        Ligands Only
+                    </label>
+                     <label>
+                        <input type="radio" name="pointsDisplay" value="receptors" checked={pointsDisplayType === 'receptors'} onChange={() => setPointsDisplayType('receptors')} disabled={data.receptor.length === 0} />
+                        Receptors Only
+                    </label>
+                     <label>
+                        <input type="radio" name="pointsDisplay" value="both" checked={pointsDisplayType === 'both'} onChange={() => setPointsDisplayType('both')} disabled={data.ligand.length === 0 || data.receptor.length === 0}/>
+                        Show Both
                     </label>
                 </div>
             </div>
