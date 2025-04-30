@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { SharedDataStore, useSharedData } from '../services/data/SharedDataStore';
+import { SharedDataStore, useSharedData, DataRequestOptions } from '../services/data/SharedDataStore';
 
 // Type for the data returned by the /api/visualization endpoint
 interface InteractionVisualizationData {
@@ -80,12 +80,10 @@ const useInteractionData = (
             const [ligand, receptor] = selectedPair;
             
             // Use the SharedDataStore to fetch data
-            const options = {
-                fileType: 'interactions',
+            const options: DataRequestOptions = {
                 ligand,
                 receptor,
                 layer: apiScopeName,
-                priority: 'high' as const
             };
             
             // Create a URL for logging purposes only
@@ -101,7 +99,7 @@ const useInteractionData = (
 
             // Use data store to get the data
             try {
-                const data = await dataStore.getChunk(jobId, 'interactions', options);
+                const data = await dataStore.requestData(jobId, 'interactionPoints', options);
                 
                 // Check if aborted during fetch
                 if (abortSignal.aborted) {

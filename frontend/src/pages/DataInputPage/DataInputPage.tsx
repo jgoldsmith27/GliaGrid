@@ -5,6 +5,7 @@ import FileUploader from '../../components/FileUploader/FileUploader';
 import ColumnMapper from '../../components/ColumnMapper/ColumnMapper';
 import DataPreview from '../../components/DataPreview/DataPreview';
 import { FileState, FileType, FilePreviewResult, requiredColumns, mappingFields, AnalysisPayload, AnalysisMapping } from '../../types/dataTypes';
+import { SharedDataStore } from '../../services/data/SharedDataStore';
 
 // --- Define Interfaces Locally ---
 interface ColumnMappings { 
@@ -43,23 +44,11 @@ interface ProjectListing {
 }
 // --- End Local Interface Definitions ---
 
-// Augment the window interface to tell TypeScript about electronAPI
-declare global {
-  interface Window {
-    electronAPI: {
-      readFilePreview: (fileContent: string, fileName: string) => Promise<FilePreviewResult>;
-      listProjects: () => Promise<{ success: boolean; error?: string; projects?: ProjectListing[] }>;
-      saveProject: (projectName: string, projectData: { version: string; files: { expression?: string; metadata?: string; modules?: string }; mappings: ColumnMappings }) => Promise<{ success: boolean; filePath?: string; name?: string; savedAt?: string; error?: string }>;
-      loadProject: (filePath: string) => Promise<{ success: boolean; error?: string; projectState?: SavedProjectData }>;
-      deleteProject: (filePath: string, projectName: string) => Promise<{ success: boolean; error?: string; filePath?: string }>;
-    }
-  }
-}
-
 const projectFileExtension = '.gliaproj';
 
 const DataInputPage: React.FC = () => {
   const navigate = useNavigate();
+  const dataStore = SharedDataStore.getInstance();
 
   // Helper to create initial file state
   const createInitialFileState = (): FileState => ({
@@ -369,9 +358,10 @@ const DataInputPage: React.FC = () => {
           setLastJobId(result.job_id);
           console.log("[DataInputPage] Navigating to results page for job:", result.job_id);
           navigate(`/analysis/${result.job_id}`);
+
           return { success: true }; // Analysis started successfully
 
-      } catch (error) {
+      } catch (error: any) {
           const errorMessage = error instanceof Error ? error.message : String(error);
           console.error("[DataInputPage] Error during analysis start:", errorMessage);
           setAnalysisStatus(`Error starting analysis: ${errorMessage}`);

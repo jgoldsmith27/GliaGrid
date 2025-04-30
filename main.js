@@ -4,6 +4,7 @@ const fs = require('fs'); // Added for file system access
 const fsPromises = require('fs').promises;
 const Papa = require('papaparse'); // Added for CSV parsing
 const zmq = require('zeromq'); // Restored for ZeroMQ IPC
+const readline = require('readline'); // Added for line-by-line reading
 
 // --- Project File Directory Setup ---
 const projectsDir = path.join(app.getPath('userData'), 'projects');
@@ -53,7 +54,7 @@ async function setupZmqSubscriber() {
             // Send update to all subscribers
             for (const subscriber of subscribers) {
               if (!subscriber.isDestroyed()) {
-                subscriber.send('job-status-event', { jobId, ...statusData });
+                subscriber.send('job-update', { jobId, ...statusData });
               } else {
                 subscribers.delete(subscriber);
               }
@@ -259,117 +260,163 @@ ipcMain.handle('read-backend-file', async (event, fileId, options = {}) => {
   }
 });
 
-// Helper function to read CSV in chunks with filtering
+// Helper function to read CSV with efficient sampling, filtering, and chunking
 async function readCsvChunked(filePath, options = {}) {
-  // Destructure options with defaults
   const {
     offset = 0,
-    limit = null, // Default to no limit if not specified
+    limit = null,
     sampleRate = 1.0,
-    filter = null, // New filter option: { column: string, values: Array<string> }
-    columns = null // New option to select specific columns: Array<string>
+    filter = null,
+    columns = null,
+    // Add resolution alias for sampleRate for compatibility if needed
+    resolution
   } = options;
 
-  // Validate filter option
+  // Use resolution if provided and sampleRate is default, otherwise prefer sampleRate
+  const effectiveSampleRate = (resolution !== undefined && sampleRate === 1.0) ? resolution : sampleRate;
+
   const useFilter = filter && filter.column && Array.isArray(filter.values) && filter.values.length > 0;
   const filterColumn = useFilter ? filter.column : null;
   const filterValuesSet = useFilter ? new Set(filter.values) : null;
 
-  // Validate columns option
   const useColumns = Array.isArray(columns) && columns.length > 0;
   const columnSet = useColumns ? new Set(columns) : null;
 
-  console.log(`[main.js] readCsvChunked: Reading ${filePath}`);
-  if (useFilter) console.log(`[main.js] readCsvChunked: Applying filter on column '${filterColumn}' for values:`, filter.values);
-  if (useColumns) console.log(`[main.js] readCsvChunked: Selecting columns:`, columns);
+  console.log(`[main.js] readCsvChunked: Reading ${filePath} with options:`, { offset, limit, sampleRate: effectiveSampleRate, filter, columns });
 
   return new Promise((resolve, reject) => {
     const results = [];
-    let rowCount = 0; // Counts rows processed *before* filtering/sampling
-    let skippedByOffset = 0;
-    let skippedBySample = 0;
-    let skippedByFilter = 0;
-    let headerChecked = false;
+    let header = null;
+    let headerIndices = {}; // Map header names to indices
+    let requiredIndices = new Set(); // Indices of columns to keep
+    let filterColumnIndex = -1;
 
-    Papa.parse(fs.createReadStream(filePath), {
-      header: true,
-      skipEmptyLines: true,
-      step: (row) => {
-        rowCount++;
+    let linesProcessed = 0; // Includes header
+    let linesKeptAfterSampling = 0;
+    let linesReturned = 0;
 
-        // Ensure header contains necessary columns if filtering or selecting
-        if (!headerChecked) {
-          if (useFilter && !(filterColumn in row.data)) {
-             stream.abort(); // Stop parsing
-             return reject(new Error(`Filter column '${filterColumn}' not found in CSV header.`));
-          }
-          if (useColumns && !columns.every(col => col in row.data)) {
-             stream.abort();
-             const missingCols = columns.filter(col => !(col in row.data));
-             return reject(new Error(`Selected column(s) not found in CSV header: ${missingCols.join(', ')}`));
-          }
-          headerChecked = true;
-        }
+    const fileStream = fs.createReadStream(filePath);
+    const rl = readline.createInterface({
+      input: fileStream,
+      crlfDelay: Infinity
+    });
 
-        // 1. Apply Offset
-        if (rowCount <= offset) {
-          skippedByOffset++;
-          return;
-        }
+    rl.on('line', (line) => {
+      linesProcessed++;
 
-        // 2. Apply Filtering (if specified)
+      // 1. Process Header
+      if (!header) {
+        header = Papa.parse(line, { header: false }).data[0];
+        headerIndices = header.reduce((acc, colName, index) => {
+          acc[colName] = index;
+          return acc;
+        }, {});
+
+        // Validate filter column
         if (useFilter) {
-          const value = row.data[filterColumn];
-          if (!filterValuesSet.has(value)) {
-            skippedByFilter++;
-            return;
+          if (!(filterColumn in headerIndices)) {
+            rl.close();
+            return reject(new Error(`Filter column '${filterColumn}' not found in CSV header.`));
           }
+          filterColumnIndex = headerIndices[filterColumn];
         }
 
-        // 3. Apply Sampling (if specified)
-        if (sampleRate < 1.0 && Math.random() > sampleRate) {
-          skippedBySample++;
-          return;
-        }
-        
-        // 4. Apply Limit (based on results accumulated *after* filtering/sampling)
-        if (limit !== null && results.length >= limit) {
-          // Once limit is reached, abort the parsing stream for efficiency
-          // Need access to the stream object, get it from the config
-          // (Assuming PapaParse passes the stream or control object)
-          // This part might need adjustment based on PapaParse specifics
-          // For now, just return to stop adding results
-          return; 
-        }
-
-        // 5. Select Columns (if specified)
-        let resultData = row.data;
+        // Validate and map selected columns
         if (useColumns) {
-          resultData = {};
-          for (const col of columnSet) {
-            resultData[col] = row.data[col];
+          const missingCols = columns.filter(col => !(col in headerIndices));
+          if (missingCols.length > 0) {
+            rl.close();
+            return reject(new Error(`Selected column(s) not found in CSV header: ${missingCols.join(', ')}`));
           }
+          requiredIndices = new Set(columns.map(col => headerIndices[col]));
+        } else {
+          // If not selecting specific columns, keep all
+          requiredIndices = new Set(header.map((_, index) => index));
         }
-
-        results.push(resultData);
-      },
-      complete: (parseResult) => {
-        // If limit was hit, slice the results just in case extra rows were processed before stream aborted
-        const finalResults = limit !== null ? results.slice(0, limit) : results;
-        
-        console.log(`[main.js] readCsvChunked: Completed. Total rows scanned: ${rowCount}, Returned: ${finalResults.length}, Skipped (Offset: ${skippedByOffset}, Sample: ${skippedBySample}, Filter: ${skippedByFilter})`);
-        resolve({
-          data: finalResults,
-          totalRows: rowCount, // Total rows scanned in the file (or up to abort)
-          returnedRows: finalResults.length,
-          skippedRows: skippedByOffset + skippedBySample + skippedByFilter,
-          // Add metadata about filtering/sampling?
-        });
-      },
-      error: (error) => {
-        console.error(`[main.js] readCsvChunked: Error parsing ${filePath}:`, error);
-        reject(error);
+        return; // Skip header line from data processing
       }
+      
+      // Stop reading if limit is already reached (optimization)
+      if (limit !== null && linesReturned >= limit) {
+          if (!rl.closed) {
+              rl.close(); // Close the readline interface
+              fileStream.destroy(); // Destroy the underlying file stream
+          }
+          return;
+      }
+
+      // 2. Apply Sampling (Probabilistic)
+      if (effectiveSampleRate < 1.0 && Math.random() > effectiveSampleRate) {
+        return; // Skip this line
+      }
+      linesKeptAfterSampling++;
+
+      // 3. Parse the sampled line (only if needed for filtering or result)
+      // Use PapaParse for robust CSV parsing of the single line
+      const rowDataArray = Papa.parse(line, { header: false }).data[0];
+      
+      // Create object if filtering or selecting columns, otherwise keep array?
+      // Let's create object for easier access
+      const rowData = {};
+      header.forEach((colName, index) => {
+           if (requiredIndices.has(index)) { // Only include required columns
+              rowData[colName] = rowDataArray[index];
+           }
+      });
+
+      // 4. Apply Filtering (on sampled data)
+      if (useFilter) {
+        const value = rowDataArray[filterColumnIndex]; // Get value using index
+        if (!filterValuesSet.has(value)) {
+          return; // Skip this line
+        }
+      }
+
+      // 5. Apply Offset (based on lines *kept* after sampling/filtering)
+      if (linesKeptAfterSampling <= offset) { 
+        return; // Skip due to offset
+      }
+
+      // 6. Select columns (already done when creating rowData object)
+      // let finalRowData = rowData;
+      // if (useColumns) {
+      //   finalRowData = {};
+      //   for (const col of columnSet) {
+      //     finalRowData[col] = rowData[col];
+      //   }
+      // }
+
+      // 7. Add to results and check Limit
+      results.push(rowData);
+      linesReturned++;
+
+      if (limit !== null && linesReturned >= limit) {
+         if (!rl.closed) {
+             rl.close();
+             fileStream.destroy();
+         }
+      }
+    });
+
+    rl.on('close', () => {
+      console.log(`[main.js] readCsvChunked: Completed. Total lines processed: ${linesProcessed}, Kept after sampling: ${linesKeptAfterSampling}, Returned after offset/limit/filter: ${results.length}`);
+      resolve({
+        data: results,
+        totalRows: linesProcessed -1, // Exclude header from count
+        returnedRows: results.length,
+        // Provide more detailed skip counts if needed
+      });
+    });
+
+    rl.on('error', (error) => {
+      console.error(`[main.js] readCsvChunked: Error reading ${filePath}:`, error);
+      reject(error);
+    });
+
+    fileStream.on('error', (error) => { // Handle stream errors too
+        console.error(`[main.js] readCsvChunked: File stream error for ${filePath}:`, error);
+        if (!rl.closed) rl.close();
+        reject(error);
     });
   });
 }
@@ -395,7 +442,7 @@ ipcMain.handle('subscribe-job-status', async (event, jobId) => {
   // Immediately fetch current status and send it
   try {
     const initialStatus = await fetchJobStatus(jobId);
-    sender.send('job-status-event', { jobId, ...initialStatus });
+    sender.send('job-update', { jobId, ...initialStatus });
   } catch (error) {
     console.error(`[main.js] Error fetching initial job status: ${error}`);
     sender.send('job-status-error', { jobId, error: error.message });
@@ -444,38 +491,44 @@ async function fetchJobStatus(jobId) {
   return await response.json();
 }
 
-// --- Get Job Metadata/Context ---
-ipcMain.handle('get-job-metadata', async (event, jobId) => {
-  console.log(`[main.js] Received request for metadata for job ${jobId}`);
-  const apiUrl = `http://localhost:8000/api/analysis/context/${jobId}`; // Use the new endpoint
+// --- Reusable Internal Function for Metadata Fetching ---
+async function getJobMetadataInternal(jobId) {
+  console.log(`[main.js Internal] Fetching metadata for job ${jobId}`);
+  const apiUrl = `http://localhost:8000/api/analysis/context/${jobId}`;
   try {
-    console.log(`[main.js] Fetching context from: ${apiUrl}`);
     const response = await fetch(apiUrl);
-    
     if (!response.ok) {
-      let errorDetail = `API returned status ${response.status}`; 
+      let errorDetail = `API returned status ${response.status}`;
       try {
-         // Try to get more specific error from backend response body
          const errorBody = await response.json();
          errorDetail = errorBody.detail || errorDetail;
-      } catch (_) { /* Ignore if response body is not JSON */ }
+      } catch (_) { /* Ignore */ }
       throw new Error(errorDetail + ` fetching context for job ${jobId}`);
     }
-    
-    const contextResponse = await response.json(); // Expects { job_id: ..., context: ... }
-    
+    const contextResponse = await response.json();
     if (!contextResponse || contextResponse.context === undefined) {
-        // Handle case where backend endpoint returns OK but context is missing/null
-        throw new Error(`Context field missing in response from ${apiUrl}`);
+      throw new Error(`Context field missing in response from ${apiUrl}`);
     }
-    
-    console.log(`[main.js] Successfully fetched context for job ${jobId}`);
+    console.log(`[main.js Internal] Successfully fetched context for job ${jobId}`);
+    // Check the structure before returning
+    if (typeof contextResponse.context !== 'object' || contextResponse.context === null) {
+        console.warn(`[main.js Internal] Context received for job ${jobId} is not a valid object:`, contextResponse.context);
+        // Decide how to handle - return error or empty object?
+        // Let's return an error for now, as the structure is expected.
+        throw new Error(`Invalid context structure received from backend for job ${jobId}`);
+    }
     return { success: true, metadata: contextResponse.context };
-
   } catch (error) {
-    console.error(`[main.js] Error in get-job-metadata for job ${jobId}:`, error);
+    console.error(`[main.js Internal] Error fetching metadata for job ${jobId}:`, error);
     return { success: false, error: error.message };
   }
+}
+
+// --- Get Job Metadata/Context (IPC Handler) ---
+ipcMain.handle('get-job-metadata', async (event, jobId) => {
+  console.log(`[main.js Handler] Received request for metadata for job ${jobId}`);
+  // Call the internal reusable function
+  return await getJobMetadataInternal(jobId);
 });
 
 // Start ZMQ subscriber when app is ready

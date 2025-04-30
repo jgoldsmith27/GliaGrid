@@ -7,6 +7,8 @@ import time # For simulating work
 from typing import Dict, Any
 import logging # Import logging
 import asyncio
+from scipy.spatial import ConvexHull # ADDED: Import ConvexHull
+import numpy as np # ADDED: Import numpy for array handling
 
 # Import the new JobService and its dependency function
 from app.services.job_service import JobService, get_job_service
@@ -137,6 +139,41 @@ class AnalysisService:
             modules_df = self._load_and_standardize(modules_path, modules_mapping, STANDARDIZED_MODULE_COLS)
             logger.info(f"Job {job_id}: Data loaded successfully.")
 
+            # ADDED: Calculate Layer Boundaries (Convex Hulls)
+            layer_boundaries = {}
+            if 'layer' in spatial_df.columns and 'x' in spatial_df.columns and 'y' in spatial_df.columns:
+                logger.info(f"[Job {job_id}] Calculating layer boundaries...")
+                try:
+                    # Ensure layer names are strings for consistent dictionary keys
+                    spatial_df['layer'] = spatial_df['layer'].astype(str) 
+                    grouped = spatial_df.groupby('layer')
+                    for name, group in grouped:
+                        # Need at least 3 points to form a convex hull
+                        if len(group) >= 3:
+                            try:
+                                # Extract points as numpy array
+                                points = group[['x', 'y']].to_numpy()
+                                hull = ConvexHull(points)
+                                # Get vertices coordinates and convert to list of [x, y] pairs
+                                boundary_coords = points[hull.vertices].tolist()
+                                # Ensure the polygon is closed by adding the first point at the end if it's not already there
+                                if boundary_coords[0] != boundary_coords[-1]:
+                                    boundary_coords.append(boundary_coords[0])
+                                layer_boundaries[name] = boundary_coords
+                            except Exception as hull_error:
+                                logger.warning(f"    Could not compute convex hull for layer '{name}': {hull_error}")
+                                layer_boundaries[name] = None # Indicate failure for this layer
+                        else:
+                            logger.warning(f"    Skipping boundary calculation for layer '{name}': requires at least 3 points, found {len(group)}.\n")
+                            layer_boundaries[name] = None # Indicate insufficient points
+                except Exception as e:
+                    logger.exception(f"[Job {job_id}] Error during layer boundary calculation: {e}")
+                    logger.info(f"[Job {job_id}] Layer boundary calculation failed after {time.time() - boundary_calc_start_time:.2f} seconds.")
+                    # Continue analysis even if boundary calculation fails
+            else:
+                logger.warning(f"[Job {job_id}] Skipping layer boundary calculation: Missing 'layer', 'x', or 'y' columns in spatial data.\n")
+            # --- END Boundary Calculation ---
+
             # 2. Run Stage 1: Initial Counts (Sequential)
             await self.job_service.update_job_status(job_id, message="Calculating ligand/receptor counts...", progress=0.4)
             logger.info(f"[Job {job_id}] Status: Running, Progress: 40% (Calculating counts...)")
@@ -182,8 +219,12 @@ class AnalysisService:
             logger.info(f"Job {job_id}: Module Context Complete.")
 
             # --- DEBUG: Log final_results before structuring ---
-            logger.debug(f"[Job {job_id}] Final analysis outputs before structuring: {final_results}")
+            # logger.debug(f"[Job {job_id}] Final analysis outputs before structuring: {final_results}")
             # -------------------------------------------------
+
+            # ADDED: Include boundaries in final results
+            if layer_boundaries:
+                final_results['layer_boundaries'] = layer_boundaries
 
             # 5. Update status to success
             # Structure results to include inputs (payload) and outputs (final_results)
@@ -204,7 +245,7 @@ class AnalysisService:
             }
             
             # --- DEBUG: Log the final structured results to be saved ---
-            logger.debug(f"[Job {job_id}] Structured results being saved: {structured_results}")
+            # logger.debug(f"[Job {job_id}] Structured results being saved: {structured_results}")
             # ---------------------------------------------------------
 
             status_update = {

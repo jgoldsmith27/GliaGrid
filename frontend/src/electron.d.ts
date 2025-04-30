@@ -22,28 +22,55 @@ interface ProjectListing {
     savedAt: string; // ISO date string
 }
 
+// Define Job Status type (align with backend/ZMQ messages)
+interface JobStatusUpdate { 
+    jobId: string;
+    status: 'pending' | 'running' | 'success' | 'failed' | 'error';
+    message?: string;
+    progress?: number;
+    results?: any; 
+    job_id?: string; // Allow for backend key variation
+}
+
 declare global {
     interface Window {
       electronAPI: {
-        // Project management methods
-        saveProject: (projectName: string, projectData: any) => Promise<{ success: boolean; error?: string; filePath?: string; name?: string; savedAt?: string }>; // projectData should match structure expected by main process (version, files{ids}, mappings)
-        listProjects: () => Promise<{ success: boolean; error?: string; projects?: ProjectListing[] }>;
-        loadProject: (filePath: string) => Promise<{ success: boolean; error?: string; projectState?: SavedProjectData }>; // Returns the full saved data structure
-        deleteProject: (filePath: string, projectName: string) => Promise<{ success: boolean; error?: string; filePath?: string }>;
-
-        // Direct file access methods
-        readBackendFile: (fileId: string, options: any) => Promise<any>;
-        getJobMetadata: (jobId: string) => Promise<any>;
+        // --- File Upload/Management (Matches preload.js) ---
+        uploadFile: (fileType: string, filePath: string) => Promise<any>;
+        getFilePath: (fileId: string) => Promise<any>;
+        readCsvHeaders: (fileId: string) => Promise<{ success: boolean; headers?: string[]; error?: string }>;
+        readCsvChunk: (fileId: string, options: any) => Promise<{ success: boolean; data?: any[]; headers?: string[]; stats?: any; error?: string }>;
+        readBackendFile: (fileId: string, options: any) => Promise<{ success: boolean; data?: any[]; returnedRows?: number; totalRows?: number; warnings?: string[]; error?: string }>;
+        removeFile: (fileId: string) => Promise<any>;
         
-        // Visualization data access
-        readVisualizationData: (jobId: string, options: any) => Promise<{ success: boolean; data?: any; error?: string }>;
+        // --- Job Management & Status (Matches preload.js) ---
+        subscribeJobStatus: (jobId: string) => Promise<any>; // Returns { success: boolean }
+        unsubscribeJobStatus: (jobId: string) => Promise<any>; // Returns { success: boolean }
+        checkJobStatus: (jobId: string) => Promise<{ success: boolean; status?: any; error?: string }>; // Returns full status payload on success
+        // Listener for ZMQ/Backend job updates (Matches preload.js)
+        onJobUpdate: (callback: (jobStatus: JobStatusUpdate) => void) => () => void; // Returns cleanup function
+        
+        // --- Metadata (Matches preload.js) ---
+        getJobMetadata: (jobId: string) => Promise<{ success: boolean; metadata?: any; error?: string }>;
+        
+        // --- Backend Process Management (Example - Matches preload.js) ---
+        startBackend: () => Promise<any>;
+        stopBackend: () => Promise<any>;
+        getBackendStatus: () => Promise<any>;
+        onBackendLog: (callback: (message: string) => void) => () => void; // Returns cleanup function
 
-        // Event-driven job status API
-        subscribeJobStatus: (jobId: string) => Promise<{ success: boolean; error?: string }>;
-        unsubscribeJobStatus: (jobId: string) => Promise<{ success: boolean; error?: string }>;
-        checkJobStatus: (jobId: string) => Promise<{ success: boolean; status?: any; error?: string }>;
-        onJobStatusEvent: (callback: (data: any) => void) => (() => void); // Returns cleanup function
-        onJobStatusError: (callback: (data: any) => void) => (() => void); // Returns cleanup function
+        // --- REMOVED Old/Unused Functions --- 
+        // saveProject: ... (Now handled by backend API or specific IPC if needed differently)
+        // listProjects: ... 
+        // loadProject: ...
+        // deleteProject: ...
+        // readVisualizationData: ... (Likely replaced by direct file reads or metadata)
+        // onJobStatusEvent: ... (Replaced by onJobUpdate via ZMQ)
+        // onJobStatusError: ... (Errors handled via ZMQ or direct calls)
+        // streamSpatialData: ... (Removed)
+        // onSpatialDataChunk: ... (Removed)
+        // onSpatialDataEnd: ... (Removed)
+        // onSpatialDataError: ... (Removed)
       };
     }
 }

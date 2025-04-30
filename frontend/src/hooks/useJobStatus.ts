@@ -115,9 +115,9 @@ const useJobStatus = (jobId: string | undefined | null): UseJobStatusReturn => {
     
     console.log(`[useJobStatus] Setting up listeners for job ${jobId}`);
     
-    // Set up event listeners
-    statusListenerCleanupRef.current = window.electronAPI.onJobStatusEvent(handleStatusUpdate);
-    errorListenerCleanupRef.current = window.electronAPI.onJobStatusError(handleError);
+    // Set up event listeners using the correct function from preload.js
+    // Note: There's only one exposed listener 'onJobUpdate'. Error statuses are handled within it.
+    statusListenerCleanupRef.current = window.electronAPI.onJobUpdate(handleStatusUpdate);
     
     // Subscribe to updates for this job
     window.electronAPI.subscribeJobStatus(jobId)
@@ -148,11 +148,6 @@ const useJobStatus = (jobId: string | undefined | null): UseJobStatusReturn => {
       if (statusListenerCleanupRef.current) {
         statusListenerCleanupRef.current();
         statusListenerCleanupRef.current = null;
-      }
-      
-      if (errorListenerCleanupRef.current) {
-        errorListenerCleanupRef.current();
-        errorListenerCleanupRef.current = null;
       }
     };
   }, [jobId, handleStatusUpdate, handleError]);

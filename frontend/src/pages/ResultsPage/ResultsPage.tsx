@@ -8,6 +8,10 @@ import LayerSelector from '../../components/LayerSelector/LayerSelector'; // Ass
 import { PathwayDominanceResult, ModuleContextResult } from '../../types/analysisResults'; // Import types
 // Import the new event-driven hook
 import useJobStatus from '../../hooks/useJobStatus';
+// Import the spatial visualization component
+import SpatialOverviewVisualization from '../../components/SpatialOverviewVisualization/SpatialOverviewVisualization';
+// Import the hook for spatial stream data - REMOVED
+// import { useSpatialStreamData } from '../../services/data/SharedDataStore';
 
 // Define the structure for combined data
 export interface CombinedInteractionData {
@@ -30,7 +34,15 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
   const { jobId } = useParams<{ jobId: string }>(); // Get jobId from URL
   
   // Use the event-driven hook to manage job status
-  const { jobStatus, isLoading, error, refreshStatus } = useJobStatus(jobId);
+  const { jobStatus, isLoading: isJobStatusLoading, error: jobStatusError, refreshStatus } = useJobStatus(jobId);
+  
+  // --- Get Spatial Stream State from SharedDataStore --- REMOVED ---
+  // const { 
+  //   points: spatialPoints, 
+  //   isLoading: isSpatialLoading, 
+  //   error: spatialError, 
+  //   pointsReceived: spatialPointsReceived 
+  // } = useSpatialStreamData();
   
   // --- UI/Data State ---
   // const [currentTab, setCurrentTab] = useState<ResultsTab>('Summary'); // Removed
@@ -39,6 +51,13 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
   const [selectedLayers, setSelectedLayers] = useState<string[]>([]); 
   const [selectedPair, setSelectedPair] = useState<[string, string] | null>(null);
   const [combinedAnalysisData, setCombinedAnalysisData] = useState<CombinedInteractionData[]>([]);
+
+  // --- State for Spatial Overview Data (managed here for persistence) ---
+  // REMOVED - Now managed by SharedDataStore via useSpatialStreamData hook
+  // const [spatialPoints, setSpatialPoints] = useState<any[]>([]); 
+  // const [isSpatialLoading, setIsSpatialLoading] = useState<boolean>(false);
+  // const [spatialError, setSpatialError] = useState<string | null>(null);
+  // const [spatialPointsReceived, setSpatialPointsReceived] = useState<number>(0);
 
   // Effect to extract available layers from jobStatus (updated from hook)
   useEffect(() => {
@@ -130,6 +149,10 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
       
   }, [jobStatus, selectedScope, selectedLayers]); // Re-run when results or scope change
 
+  // --- Effect to Stream Spatial Data for Overview ---
+  // REMOVED - Streaming is initiated from DataInputPage and managed by SharedDataStore
+  // useEffect(() => { ... }, [...]); 
+
   const handleSelectPair = useCallback((pair: [string, string] | null) => {
     console.log("[ResultsPage] Setting selected pair:", pair);
     setSelectedPair(pair);
@@ -155,19 +178,19 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
   // --- UI Rendering --- 
 
   // Display initial loading message
-  if (isLoading && !jobStatus) {
+  if (isJobStatusLoading && !jobStatus) {
     return (
       <div className={styles.container}>
-        <LoadingSpinner message="Loading Analysis Results..." />
+        <LoadingSpinner message="Loading Analysis Status..." />
       </div>
     );
   }
   
-  if (isLoading && jobStatus && jobStatus.status === 'running') {
+  if (jobStatus && jobStatus.status === 'running') {
     return (
       <div className={styles.container}>
         <LoadingSpinner message={jobStatus?.message || "Processing Analysis..."} />
-        {jobStatus && jobStatus.progress !== null && jobStatus.progress !== undefined && (
+        {jobStatus.progress !== null && jobStatus.progress !== undefined && (
           <progress value={jobStatus.progress} max="1"></progress>
         )}
       </div>
@@ -175,7 +198,7 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
   }
 
   // Show waiting message if we're still waiting for results
-  if (!jobStatus || (jobStatus.status === 'pending' && !isLoading)) {
+  if (!jobStatus || (jobStatus.status === 'pending' && !isJobStatusLoading)) {
     return (
       <div className={styles.container}>
         <LoadingSpinner message="Waiting for analysis to start..." />
@@ -183,11 +206,11 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
     );
   }
 
-  if (error) {
+  if (jobStatusError) {
     return (
       <div className={styles.container}>
-        <h1>Error Loading Results</h1>
-        <p className={styles.errorMessage}>{error}</p>
+        <h1>Error Loading Job Status</h1>
+        <p className={styles.errorMessage}>{jobStatusError}</p>
       </div>
     );
   }
@@ -245,18 +268,37 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
          {/* Add other filters/settings here later */}
       </div>
 
-      {/* Content Area */} 
+      {/* Content Area - Render based on selected scope */}
       <div className={styles.contentArea}>
-          <SummaryTabContent 
-                jobId={jobId || ''} 
-                combinedData={combinedAnalysisData}
-                selectedPair={selectedPair}
-                onSelectPair={handleSelectPair}
-                // Pass the calculated scope name for API calls
-                apiScopeName={scopeForApi} 
-                // Keep passing the general scope type for conditional rendering if needed
-                currentScope={selectedScope} 
-            />
+          {selectedScope === 'custom' ? (
+              // Render Spatial Overview for Custom Selection
+              <div className={styles.spatialOverviewArea}> {/* Reuse existing styling if appropriate */} 
+                  {jobId && (
+                      <SpatialOverviewVisualization 
+                          jobId={jobId} // Pass jobId, component will get data via hook
+                          // REMOVE props related to points/loading/error
+                          // points={spatialPoints} 
+                          // isLoading={isSpatialLoading} 
+                          // error={spatialError} 
+                          // totalPointsReceived={spatialPointsReceived}
+                      />
+                  )}
+              </div>
+          ) : (
+              // Render Summary Table/Interaction Viz Area for other scopes
+              <div className={styles.summaryInteractionArea}> 
+                  <SummaryTabContent 
+                        jobId={jobId || ''} 
+                        combinedData={combinedAnalysisData}
+                        selectedPair={selectedPair}
+                        onSelectPair={handleSelectPair}
+                        // Pass the calculated scope name for API calls
+                        apiScopeName={scopeForApi} 
+                        // Keep passing the general scope type for conditional rendering if needed
+                        currentScope={selectedScope} 
+                    />
+              </div>
+          )}
       </div>
     </div>
   );
