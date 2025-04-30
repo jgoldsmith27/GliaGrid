@@ -134,4 +134,91 @@ async def get_visualization_data(
     except Exception as e:
         # Log unexpected errors
         logger.exception(f"Unexpected error generating visualization for job {job_id}, L:{ligand}, R:{receptor}, Layer:{layer}: {e}")
-        raise HTTPException(status_code=500, detail=f"An internal error occurred while generating the visualization: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"An internal error occurred while generating the visualization: {str(e)}")
+
+# --- Endpoint for All Points Data (Modified to return head) ---
+@router.get("/points/{job_id}/all")
+async def get_all_points_data(
+    job_id: str,
+    # Restore dependencies
+    job_service: JobService = Depends(get_job_service),
+    analysis_service: AnalysisService = Depends(get_analysis_service_dependency)
+):
+    """Retrieves all spatial points (x, y, layer) for a given job ID.
+
+    Used for the initial display in the custom selection visualization.
+    (Modified to return only the head for faster development)
+    """
+    logger.info(f"[ALL POINTS ENTRY] Job ID: {job_id}")
+    try:
+        # 1. Look up job context
+        logger.info(f"[ALL POINTS] Attempting to get context for job ID: {job_id}")
+        job_context = job_service.get_job_context(job_id)
+        if not job_context:
+            logger.warning(f"[ALL POINTS - RAISING 404] Job context not found for job ID: {job_id}")
+            raise HTTPException(status_code=404, detail=f"Job context for job ID {job_id} not found.")
+
+        logger.info(f"[ALL POINTS] Job context found for {job_id}.")
+
+        # 2. Extract necessary info from context
+        spatial_file_id = job_context.get("spatialFileId")
+        spatial_mapping_dict = job_context.get("spatialMapping")
+        if not spatial_file_id or not spatial_mapping_dict:
+             logger.error(f"[ALL POINTS] Spatial file ID or mapping missing in job context for {job_id}")
+             raise HTTPException(status_code=400, detail="Job context is incomplete. Missing spatial file ID or mapping.")
+        
+        try:
+            spatial_mapping = AnalysisMapping(**spatial_mapping_dict)
+        except Exception as e:
+             logger.error(f"[ALL POINTS] Error converting spatial mapping from context for {job_id}: {e}")
+             raise HTTPException(status_code=500, detail="Error processing job context mapping.")
+
+        # 3. Load and standardize the spatial file
+        logger.info(f"[ALL POINTS] Loading spatial file {spatial_file_id} for job {job_id}")
+        spatial_path = FileService.get_file_path(spatial_file_id)
+        
+        try:
+            # Use the standardization method (currently from AnalysisService)
+            df_full = analysis_service._load_and_standardize(
+                spatial_path,
+                spatial_mapping,
+                STANDARDIZED_SPATIAL_COLS # Make sure 'layer' is included here or handled
+            )
+            logger.info(f"[ALL POINTS] Full spatial data loaded and standardized for job {job_id}. Shape: {df_full.shape}")
+            
+            # MODIFY: Take a random sample of rows instead of just the first N
+            N_ROWS_TO_TAKE = 100 
+            # df = df_full.head(N_ROWS_TO_TAKE).copy() # Old approach - first N rows
+            df = df_full.sample(n=N_ROWS_TO_TAKE, random_state=42).copy() # New approach - random sample
+            
+            # Log the layer distribution in the sample for debugging
+            if 'layer' in df.columns:
+                layer_counts = df['layer'].value_counts().to_dict()
+                logger.info(f"[ALL POINTS] Layer distribution in sample: {layer_counts}")
+            
+            logger.info(f"[ALL POINTS] Using random sample of {len(df)} rows for response.")
+
+        except Exception as load_err:
+            logger.exception(f"[ALL POINTS] Error loading/standardizing spatial file {spatial_file_id} for job {job_id}: {load_err}")
+            raise HTTPException(status_code=500, detail=f"Failed to load or standardize spatial data: {load_err}")
+
+        # 4. Check for required columns (on the truncated dataframe)
+        required_cols = ['x', 'y', 'layer']
+        if not all(col in df.columns for col in required_cols):
+            missing_cols = [col for col in required_cols if col not in df.columns]
+            logger.error(f"[ALL POINTS] Truncated spatial data for job {job_id} is missing required columns: {missing_cols}. Available: {df.columns.tolist()}")
+            raise HTTPException(status_code=500, detail=f"Truncated spatial data is missing required columns: {', '.join(missing_cols)}")
+
+        # 5. Select and format data for response (from the truncated dataframe)
+        points_data = df[required_cols].to_dict("records")
+        
+        logger.info(f"[ALL POINTS] Returning {len(points_data)} (truncated) points for job {job_id}.")
+        return points_data
+
+    except HTTPException as he:
+        # Re-raise HTTPExceptions explicitly
+        raise he
+    except Exception as e:
+        # Catch unexpected errors
+        logger.exception(f"[ALL POINTS] Unexpected error retrieving all points for job {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}") 
