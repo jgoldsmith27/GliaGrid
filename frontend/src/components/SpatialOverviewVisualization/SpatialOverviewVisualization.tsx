@@ -69,7 +69,7 @@ const getInitialViewState = (validBoundaries: Record<string, LayerBoundary>) => 
 // Define component props
 interface SpatialOverviewVisualizationProps {
   jobId: string;
-  onLassoSelect?: (selectedLayerNames: string[]) => void; // Optional callback
+  onLassoSelect?: (selectedCoords: [number, number][] | null) => void; // MODIFIED: Expect coords or null
 }
 
 const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> = ({ jobId, onLassoSelect }) => {
@@ -85,7 +85,6 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
   // --- Lasso State --- 
   const [isDrawingLasso, setIsDrawingLasso] = useState(false);
   const [lassoPoints, setLassoPoints] = useState<[number, number][]>([]);
-  const [selectedLayerNames, setSelectedLayerNames] = useState<string[]>([]);
   const isDragging = useRef(false);
 
   // Process JOB RESULTS to find unique layers, assign colors, and get boundaries
@@ -174,17 +173,14 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
   // --- Lasso Event Handlers --- 
   const handleDragStart = useCallback((info: PickingInfo, event: any) => {
       if (!isDrawingLasso) return;
-      // Start drawing only on primary button click
       if (event.leftButton) {
           isDragging.current = true;
-          setLassoPoints([info.coordinate as [number, number]]); // Start with the first point
-          setSelectedLayerNames([]); // Clear previous selection
+          setLassoPoints([info.coordinate as [number, number]]); 
       }
   }, [isDrawingLasso]);
 
   const handleDrag = useCallback((info: PickingInfo, event: any) => {
       if (!isDrawingLasso || !isDragging.current) return;
-      // Add point if dragging with primary button down
       if (event.leftButton) {
           setLassoPoints(prev => {
               const next = [...prev, info.coordinate as [number, number]];
@@ -199,55 +195,39 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
       
       isDragging.current = false;
       
-      // Finalize the polygon (close it)
-      const finalPoints = [...lassoPoints, lassoPoints[0]]; // Add first point to end
-      setLassoPoints(finalPoints);
+      const finalPoints = [...lassoPoints, lassoPoints[0]]; // Close the polygon
+      // Keep lasso visual points until cleared
+      // setLassoPoints(finalPoints);
 
       // Perform selection check
       if (finalPoints.length >= 4) { // Need at least 3 points + closing point
+          // REMOVED: Layer intersection logic
+          /*
           const lassoPolygon = turfPolygon([finalPoints]);
           const newlySelectedLayers: string[] = [];
-          
-          Object.entries(rawLayerBoundaries).forEach(([layerName, boundary]) => {
-              if (boundary && visibleLayers.has(layerName)) { // Only check visible layers with boundaries
-                  // Check if any vertex of the layer boundary is inside the lasso
-                  // More robust check: Check intersection of polygons (requires turf/intersect or similar)
-                  // Simple check for now: is any boundary vertex inside lasso?
-                  const boundaryPolygonFeature: GeoJsonFeature<Polygon> = turfPolygon([boundary]); // Create Feature for checking
-                  const isIntersecting = boundary.some(coord => {
-                      try {
-                        // Use correct imports: turfPoint for point, lassoPolygon Feature
-                        return booleanPointInPolygon(turfPoint(coord), lassoPolygon);
-                      } catch (e) {
-                        console.error("Error in booleanPointInPolygon:", e, coord, lassoPolygon);
-                        return false;
-                      }
-                  });
-                  
-                  // Check if center of polygon is inside? May need centroid calculation
-                  // const center = centroid(turfPolygon([boundary])); // Requires @turf/centroid
-                  // const isCenterInside = booleanPointInPolygon(center, lassoPolygon);
-
-                  if (isIntersecting) { // Or use a more robust intersection check
-                      newlySelectedLayers.push(layerName);
-                  }
-              }
-          });
-          
+          Object.entries(rawLayerBoundaries).forEach(([layerName, boundary]) => { ... });
           setSelectedLayerNames(newlySelectedLayers);
           console.log("[SpatialOverview] Lasso selected layers:", newlySelectedLayers);
+          */
+          
+          // MODIFIED: Call callback with lasso coordinates
+          console.log("[SpatialOverview] Lasso completed with points:", finalPoints);
           if (onLassoSelect) {
-              onLassoSelect(newlySelectedLayers);
+              onLassoSelect(finalPoints);
+          }
+      } else {
+          // If not enough points, clear selection via callback
+          if (onLassoSelect) {
+              onLassoSelect(null);
           }
       }
-      // Don't clear points immediately, keep polygon visible until cleared
-      // setIsDrawingLasso(false); // Optionally disable drawing after one lasso
-  }, [isDrawingLasso, lassoPoints, rawLayerBoundaries, visibleLayers, onLassoSelect]);
+      // Deactivate lasso mode automatically after drawing finishes
+      setIsDrawingLasso(false);
+  }, [isDrawingLasso, lassoPoints, onLassoSelect]); // REMOVED dependencies: rawLayerBoundaries, visibleLayers
 
   // --- Lasso UI Controls --- 
   const toggleLasso = () => {
       if (isDrawingLasso) {
-          // If currently drawing, disable and clear
           clearLasso();
       }
       setIsDrawingLasso(!isDrawingLasso);
@@ -256,9 +236,11 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
   const clearLasso = () => {
       setIsDrawingLasso(false);
       setLassoPoints([]);
-      setSelectedLayerNames([]);
+      // REMOVED: No layer names to clear
+      // setSelectedLayerNames([]); 
+      // MODIFIED: Call callback with null to clear selection
       if (onLassoSelect) {
-        onLassoSelect([]);
+        onLassoSelect(null);
       }
   };
 
@@ -280,18 +262,17 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
                   id: `boundary-${layerName}`,
                   data: [{ polygon: boundary, layerName: layerName }], // Data format for PolygonLayer
                   getPolygon: (d: PolygonDataItem) => d.polygon,
-                  getFillColor: selectedLayerNames.includes(layerName) ? 
-                                [255, 255, 0, 150] : // Yellow highlight
-                                (layerColors[layerName] || [128, 128, 128, 50]), 
+                  getFillColor: layerColors[layerName] || [128, 128, 128, 50],
                   getLineColor: [255, 255, 255, 150], // White outline
-                  getLineWidth: selectedLayerNames.includes(layerName) ? 3 : 1, // Thicker line for selected
+                  getLineWidth: 1,
                   lineWidthMinPixels: 1,
                   pickable: !isDrawingLasso, // Disable picking layer polygons while drawing lasso
                   autoHighlight: !isDrawingLasso, // Disable auto-highlight while drawing
                   highlightColor: [255, 255, 255, 100],
                   updateTriggers: { // Trigger update when selection changes
-                    getFillColor: [selectedLayerNames],
-                    getLineWidth: [selectedLayerNames]
+                    // REMOVED: selectedLayerNames triggers
+                    // getFillColor: [selectedLayerNames],
+                    // getLineWidth: [selectedLayerNames]
                   }
               });
           })
@@ -328,7 +309,7 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
        }
        return finalLayers as (PolygonLayer<any> | GeoJsonLayer<any>)[];
 
-  }, [rawLayerBoundaries, visibleLayers, layerColors, isDrawingLasso, lassoPoints, selectedLayerNames]);
+  }, [rawLayerBoundaries, visibleLayers, layerColors, isDrawingLasso, lassoPoints]); // REMOVED dependency: selectedLayerNames
 
   const toggleFullscreen = () => {
     setIsFullscreen(!isFullscreen);
@@ -436,7 +417,7 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
                 )}
               </div>
           </div>
-          {/* Lasso Controls */}
+          {/* Lasso Controls - Remove selected layer display */}
           <div className={`${styles.controlSection} ${styles.lassoControls}`}> 
                 <h4>Selection Tool</h4>
                 <button 
@@ -447,16 +428,18 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
                 > 
                   {isDrawingLasso ? 'Cancel Lasso' : 'Start Lasso'}
                 </button>
-                {lassoPoints.length > 0 && (
+                {/* MODIFIED: Clear button is always shown when lasso is active or points exist */}
+                {(isDrawingLasso || lassoPoints.length > 0) && (
                     <button onClick={clearLasso}> 
                       Clear Selection
                     </button>
                 )}
+                {/* REMOVED: Display of selectedLayerNames 
                 {selectedLayerNames.length > 0 && (
                     <div className={styles.selectionInfo}>
                       Selected: {selectedLayerNames.join(', ')}
                     </div>
-                )}
+                )} */}
            </div>
       </div>
       {/* Fullscreen Toggle Button - Use standard button with unicode characters */}

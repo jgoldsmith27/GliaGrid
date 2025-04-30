@@ -21,6 +21,7 @@ interface SummaryTabContentProps {
   onSelectPair: (pair: [string, string] | null) => void; // Allow null to clear selection
   currentScope: ScopeType; 
   apiScopeName: string | null; // ADDED: The actual scope name for the API call
+  onLassoSelect?: (coords: [number, number][] | null) => void; // ADDED prop definition
 }
 
 // Define columns for the combined table
@@ -49,6 +50,7 @@ const SummaryTabContent: React.FC<SummaryTabContentProps> = ({
   onSelectPair,
   currentScope, 
   apiScopeName, // ADDED
+  onLassoSelect, // ADDED prop destructuring
 }) => {
   // State for SpatialOverviewVisualization
   const [allPointsData, setAllPointsData] = useState<AllPointsData[] | null>(null);
@@ -187,7 +189,7 @@ const SummaryTabContent: React.FC<SummaryTabContentProps> = ({
             return <p className={styles.errorText}>Error loading spatial overview: {allPointsError}</p>;
         }
         if (allPointsData) {
-            return <SpatialOverviewVisualization allPointsData={allPointsData} />;
+            return <SpatialOverviewVisualization jobId={jobId} onLassoSelect={onLassoSelect} />;
         }
         return <p>No spatial overview data available.</p>; // Or initial state message
 

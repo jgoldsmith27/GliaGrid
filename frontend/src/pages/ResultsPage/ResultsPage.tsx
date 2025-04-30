@@ -51,6 +51,7 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
   const [selectedLayers, setSelectedLayers] = useState<string[]>([]); 
   const [selectedPair, setSelectedPair] = useState<[string, string] | null>(null);
   const [combinedAnalysisData, setCombinedAnalysisData] = useState<CombinedInteractionData[]>([]);
+  const [lassoCoords, setLassoCoords] = useState<[number, number][] | null>(null); // ADDED state for lasso coords
 
   // --- State for Spatial Overview Data (managed here for persistence) ---
   // REMOVED - Now managed by SharedDataStore via useSpatialStreamData hook
@@ -156,6 +157,15 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
   const handleSelectPair = useCallback((pair: [string, string] | null) => {
     console.log("[ResultsPage] Setting selected pair:", pair);
     setSelectedPair(pair);
+  }, []);
+
+  // ADDED: Handler for lasso selection coordinates
+  const handleLassoSelect = useCallback((coords: [number, number][] | null) => {
+    console.log("[ResultsPage] Lasso selection coords:", coords);
+    setLassoCoords(coords);
+    // TODO: Add logic here later to use the coords, e.g., trigger a custom analysis
+    // If setting coords, might want to ensure scope is 'custom'?
+    // if (coords) { setSelectedScope('custom'); }
   }, []);
   
   // --- Scope Change Handlers ---
@@ -292,10 +302,9 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
                         combinedData={combinedAnalysisData}
                         selectedPair={selectedPair}
                         onSelectPair={handleSelectPair}
-                        // Pass the calculated scope name for API calls
                         apiScopeName={scopeForApi} 
-                        // Keep passing the general scope type for conditional rendering if needed
                         currentScope={selectedScope} 
+                        onLassoSelect={handleLassoSelect} // ADDED prop pass-through
                     />
               </div>
           )}
