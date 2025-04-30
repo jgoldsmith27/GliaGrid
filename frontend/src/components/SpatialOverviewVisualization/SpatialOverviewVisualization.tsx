@@ -11,7 +11,7 @@ import LoadingSpinner from '../LoadingSpinner/LoadingSpinner'; // Import Loading
 import useJobStatus from '../../hooks/useJobStatus'; // Correct: Default import
 // Import turf/boolean-point-in-polygon or similar for intersection checks
 import booleanPointInPolygon from '@turf/boolean-point-in-polygon'; // Correct: Default import
-import { polygon as turfPolygon, point as turfPoint, feature, polygon } from '@turf/helpers'; // Correct: Named imports + types
+import { polygon as turfPolygon, point as turfPoint, feature, polygon, lineString as turfLineString } from '@turf/helpers'; // Correct: Named imports + types
 import { Feature as GeoJsonFeature, Point as GeoJsonPoint, GeoJsonProperties, Polygon } from 'geojson'; // Import GeoJSON types
 
 // Define types locally or import from a central types file
@@ -186,7 +186,11 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
       if (!isDrawingLasso || !isDragging.current) return;
       // Add point if dragging with primary button down
       if (event.leftButton) {
-          setLassoPoints(prev => [...prev, info.coordinate as [number, number]]);
+          setLassoPoints(prev => {
+              const next = [...prev, info.coordinate as [number, number]];
+              console.log('[handleDrag] Adding point, new count:', next.length, 'Coords:', info.coordinate); // LOGGING
+              return next;
+          });
       }
   }, [isDrawingLasso]);
 
@@ -294,12 +298,13 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
           .filter(layer => layer !== null); // Filter out any null layers from map
           
        // Add Lasso Layer if drawing
-       const lassoLayer = isDrawingLasso && lassoPoints.length > 1 ?
+       const lassoLayer = isDrawingLasso && lassoPoints.length >= 2 ?
             new GeoJsonLayer({
                 id: 'lasso-layer',
                 // Data for GeoJsonLayer should be a Feature or FeatureCollection
-                data: turfPolygon([lassoPoints.length >=3 ? [...lassoPoints, lassoPoints[0]] : lassoPoints ], { layerType: 'lasso' }), // Create a Turf polygon Feature directly
-                // Example adding properties if needed later: turfPolygon([lassoPoints.length >=3 ? [...lassoPoints, lassoPoints[0]] : lassoPoints ], { name: 'My Lasso', isTemporary: true }),
+                data: lassoPoints.length >= 3 
+                    ? turfPolygon([[...lassoPoints, lassoPoints[0]]], { layerType: 'lasso' }) // Polygon feature
+                    : turfLineString(lassoPoints, { layerType: 'lasso' }), // LineString feature
                 stroked: true,
                 filled: lassoPoints.length >= 3, // Only fill if it's a polygon
                 getLineColor: [255, 0, 0, 200], // Red line
@@ -315,6 +320,12 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
        ].filter(Boolean); // Filter out null lasso layer
           
        console.log(`[SpatialOverviewVisualization] Rendering ${boundaryLayers.length} boundary layers. Lasso active: ${isDrawingLasso}`);
+       // LOGGING added below
+       if (lassoLayer) {
+           console.log('[Layers Memo] Lasso Layer Data:', lassoLayer.props.data);
+       } else {
+           console.log('[Layers Memo] No Lasso Layer. Points:', lassoPoints.length);
+       }
        return finalLayers as (PolygonLayer<any> | GeoJsonLayer<any>)[];
 
   }, [rawLayerBoundaries, visibleLayers, layerColors, isDrawingLasso, lassoPoints, selectedLayerNames]);
