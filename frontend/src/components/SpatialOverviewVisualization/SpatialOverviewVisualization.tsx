@@ -4,15 +4,15 @@ import DeckGL from '@deck.gl/react';
 import { OrthographicView, OrthographicViewState, ViewStateChangeParameters, Color, PickingInfo, MapViewState } from '@deck.gl/core';
 import { scaleOrdinal } from 'd3-scale';
 import { schemeCategory10 } from 'd3-scale-chromatic'; // Example color scheme
+import IconButton from '@mui/material/IconButton'; // Keep this if other IconButtons are used, otherwise remove
 import styles from './SpatialOverviewVisualization.module.css';
 import { SharedDataStore, useSharedData } from '../../services/data/SharedDataStore'; // Import SharedDataStore
 import LoadingSpinner from '../LoadingSpinner/LoadingSpinner'; // Import LoadingSpinner
 import useJobStatus from '../../hooks/useJobStatus'; // Correct: Default import
-// Import correct analysis types
-import { LayerBoundary, PointFeature, JobResultOutput } from '../../types/analysisResults'; // Correct path and types
 // Import turf/boolean-point-in-polygon or similar for intersection checks
 import booleanPointInPolygon from '@turf/boolean-point-in-polygon'; // Correct: Default import
-import { polygon as turfPolygon, point as turfPoint, Feature, Polygon } from '@turf/helpers'; // Correct: Named imports + types
+import { polygon as turfPolygon, point as turfPoint, feature, polygon } from '@turf/helpers'; // Correct: Named imports + types
+import { Feature as GeoJsonFeature, Point as GeoJsonPoint, GeoJsonProperties, Polygon } from 'geojson'; // Import GeoJSON types
 
 // Define types locally or import from a central types file
 // Removed SpatialPoint definition as PointFeature is imported
@@ -209,7 +209,7 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
                   // Check if any vertex of the layer boundary is inside the lasso
                   // More robust check: Check intersection of polygons (requires turf/intersect or similar)
                   // Simple check for now: is any boundary vertex inside lasso?
-                  const boundaryPolygonFeature: Feature<Polygon> = turfPolygon([boundary]); // Create Feature for checking
+                  const boundaryPolygonFeature: GeoJsonFeature<Polygon> = turfPolygon([boundary]); // Create Feature for checking
                   const isIntersecting = boundary.some(coord => {
                       try {
                         // Use correct imports: turfPoint for point, lassoPolygon Feature
@@ -395,49 +395,66 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
           style={{ width: '100%', height: '100%', position: 'relative' }}
         />
       </div>
-      {/* Layer Visibility Controls */}
-      <div className={styles.layerControls}>
-        <h4>Layers</h4>
-        {uniqueLayerNames.length > 0 ? (
-          uniqueLayerNames.map((layerName) => (
-            <div key={layerName} className={styles.layerControlItem}>
-              <input
-                type="checkbox"
-                id={`layer-toggle-${layerName}`}
-                checked={visibleLayers.has(layerName)}
-                onChange={() => toggleLayerVisibility(layerName)}
-                disabled={isDrawingLasso} // Disable while drawing
-              />
-              <label htmlFor={`layer-toggle-${layerName}`}>
-                <span className={styles.colorSwatch} style={{ backgroundColor: `rgba(${layerColors[layerName]?.join(',')})` }}></span>
-                {layerName}
-              </label>
-            </div>
-          ))
-        ) : (
-          <p>No layers found.</p>
-        )}
-      </div>
-      {/* Lasso Controls */}
-       <div className={styles.lassoControls}>
-            <h4>Selection Tool</h4>
-            <button onClick={toggleLasso} disabled={!jobStatus?.results}> 
-              {isDrawingLasso ? 'Cancel Lasso' : 'Start Lasso'}
-            </button>
-            {lassoPoints.length > 0 && (
-                <button onClick={clearLasso} style={{ marginLeft: '5px' }}>
-                  Clear Selection
+      {/* Controls Overlay */}
+      <div className={styles.controlsOverlay}>
+          {/* Layer Visibility Controls */}
+          <div className={styles.controlSection}>
+              <h4>Layers</h4>
+              <div className={styles.layerLegendContainer}>
+                {uniqueLayerNames.length > 0 ? (
+                  uniqueLayerNames.map((layerName) => (
+                    <div key={layerName} className={styles.layerControlItem} onClick={() => toggleLayerVisibility(layerName)} title={`Toggle ${layerName}`}>
+                      <input
+                        type="checkbox"
+                        readOnly // Control checked state via parent div click
+                        className={styles.layerToggleCheckbox}
+                        checked={visibleLayers.has(layerName)}
+                        // Remove onChange handler, handled by div click
+                        disabled={isDrawingLasso} 
+                      />
+                      {/* Ensure color swatch uses the correct class */}
+                      <span 
+                        className={styles.legendColorSwatch} 
+                        style={{ backgroundColor: `rgba(${layerColors[layerName]?.join(',')})` }}
+                      ></span>
+                      <span className={styles.layerNameText}>{layerName}</span>
+                    </div>
+                  ))
+                ) : (
+                  <p>No layers found.</p>
+                )}
+              </div>
+          </div>
+          {/* Lasso Controls */}
+          <div className={`${styles.controlSection} ${styles.lassoControls}`}> 
+                <h4>Selection Tool</h4>
+                <button 
+                    onClick={toggleLasso} 
+                    disabled={!jobStatus?.results} 
+                    // Add activeLasso class when drawing
+                    className={isDrawingLasso ? styles.activeLasso : ''} 
+                > 
+                  {isDrawingLasso ? 'Cancel Lasso' : 'Start Lasso'}
                 </button>
-            )}
-            {selectedLayerNames.length > 0 && (
-                <div className={styles.selectionInfo}>
-                  Selected: {selectedLayerNames.join(', ')}
-                </div>
-            )}
-       </div>
-      {/* Fullscreen Toggle */}
-      <button onClick={toggleFullscreen} className={styles.fullscreenButton}>
-        {isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
+                {lassoPoints.length > 0 && (
+                    <button onClick={clearLasso}> 
+                      Clear Selection
+                    </button>
+                )}
+                {selectedLayerNames.length > 0 && (
+                    <div className={styles.selectionInfo}>
+                      Selected: {selectedLayerNames.join(', ')}
+                    </div>
+                )}
+           </div>
+      </div>
+      {/* Fullscreen Toggle Button - Use standard button with unicode characters */}
+      <button 
+          onClick={toggleFullscreen} 
+          className={styles.fullscreenButton} // Apply the style class
+          title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
+      >
+        {isFullscreen ? '✕' : '⛶'}
       </button>
     </div>
   );
