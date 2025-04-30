@@ -16,18 +16,21 @@ Leverage the existing components (`SummaryTabContent`, `Visualization`) with mod
 
 ## Implementation Steps
 
-### 1. Backend API Endpoint
+### 1. Backend API Endpoint (Phase 1 - All Points Data)
 
-*   **Endpoint:** `GET /api/points/{jobId}/all`
-*   **Functionality:** Retrieve all spatial points (`x`, `y`, `layer`) associated with the given `jobId`.
-*   **Response Format (Example):**
-    ```json
-    [
-      { "x": 10.5, "y": 25.1, "layer": "Layer 1" },
-      { "x": 12.3, "y": 28.9, "layer": "Layer 2" },
-      // ... other points
-    ]
-    ```
+*   **Requirement:** A way to fetch all raw spatial points (`x`, `y`, `layer`) for the initial display in the custom selection mode.
+*   **Confirmation:** Code review confirms the existing `/api/visualization/{job_id}` endpoint is designed for specific L-R pairs within a predefined scope (layer or whole tissue) and cannot serve this purpose.
+*   **Action:** Implement the **new endpoint** as planned:
+    *   **Endpoint:** `GET /api/points/{jobId}/all`
+    *   **Functionality:** Retrieve all spatial points (`x`, `y`, `layer`) associated with the given `jobId` from the underlying data source.
+    *   **Response Format (Example):**
+        ```json
+        [
+          { \"x\": 10.5, \"y\": 25.1, \"layer\": \"Layer 1\" },
+          { \"x\": 12.3, \"y\": 28.9, \"layer\": \"Layer 2\" },
+          // ... other points
+        ]
+        ```
 
 ### 2. Frontend: `SummaryTabContent.tsx` Modifications
 
@@ -101,6 +104,22 @@ Leverage the existing components (`SummaryTabContent`, `Visualization`) with mod
 
 ## Phase 2 (Future)
 
-*   Integrate Deck.gl's `EditableGeoJsonLayer` or a similar mechanism for lasso selection when `currentScope === 'custom'`.
-*   Capture selected points based on the drawn polygon.
-*   Implement backend endpoint and frontend logic to trigger analysis on the selected points. 
+*   **Lasso Selection:** Integrate Deck.gl's `EditableGeoJsonLayer` or a similar mechanism into `SpatialOverviewVisualization` to allow users to draw a polygon (lasso) when `currentScope === 'custom'`.
+*   **Point Capture:** Capture the coordinates of the points from `allPointsData` that fall within the user-drawn polygon.
+*   **Custom Analysis Trigger:** Implement a mechanism (e.g., a button appearing after selection) for the user to initiate the analysis pipeline on the subset of captured points. This will involve:
+    *   **Backend Endpoint & Service:** 
+        *   **Confirmation:** Code review reveals an existing, partially implemented endpoint `POST /api/analysis/start/custom_selection` designed for this purpose.
+        *   **Action:** The primary backend task is to **fully implement the service method** called by this endpoint: `AnalysisService.run_custom_analysis_background(job_id, request)`.
+        *   This service method must handle the received point list, potentially adapt/call the core analysis pipeline, and manage job status updates via `JobService`.
+    *   **Core Analysis Pipeline:** The underlying analysis logic (pathway dominance, module context, etc.) may need **adaptation** to correctly process an arbitrary subset of points instead of just predefined scopes (whole tissue/layers).
+    *   **Frontend Logic:** Calling the *existing* `POST /api/analysis/start/custom_selection` endpoint with the captured points and handling the asynchronous analysis status (polling/WebSocket).
+*   **Displaying Custom Results:** Once the custom analysis is complete and results are available:
+    *   **State Management:** Introduce state in `ResultsPage.tsx` or a dedicated hook to store the results (scores, interaction coordinates, etc.) specifically for the custom run.
+    *   **`SummaryTabContent.tsx` Update:**
+        *   Modify the conditional rendering logic. The `AnalysisTable` should reappear when custom results are available, displaying the scores calculated *for the custom region*.
+        *   The `InteractionVisualization` should be rendered when a user clicks a row in the custom results table, visualizing the interactions *within the custom region*. The necessary data (coordinates, scope details for the custom run) needs to be passed down.
+    *   **Data Flow & Result Storage:** 
+        *   Ensure the data fetching logic (potentially within `useInteractionData` or a new hook) can request and handle visualization data based on the completed custom analysis run.
+        *   Define how custom analysis results are stored and identified on the backend (e.g., associated with the original `jobId` but under a unique custom run identifier or scope).
+*   **Scope within Custom Results (Optional):** Consider adding controls (similar to the main Scope Selector) that appear *after* custom analysis is done, allowing the user to view the custom results aggregated across the whole selection (\"Whole Selection\") or broken down by the original layers present within that selection (\"Layers\"). This would require the custom analysis results to be structured accordingly (e.g., results available per layer within the selection).
+*   **UI Refinements:** Adjust titles and UI elements to clearly indicate that the user is viewing results from their custom selection. 

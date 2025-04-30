@@ -231,22 +231,28 @@ const SummaryTabContent: React.FC<SummaryTabContentProps> = ({
   };
 
   return (
+    // Main container with flex layout
     <div className={styles.summaryLayout}> 
-      <div className={styles.tableArea}> 
-        <h3>Interaction Scores ({currentScope === 'custom' ? 'N/A' : apiScopeName || currentScope})</h3> 
-        <AnalysisTable
-          data={combinedData}
-          columns={combinedColumns}
-          onRowClick={handleTableRowClick}
-          selectedRowIndex={selectedRowIndex}
-          loading={isLoadingInteractionViz}
-        />
-      </div>
+      {/* FIX: Conditionally render the table section only if scope is NOT custom */}
+      {currentScope !== 'custom' && ( 
+        <div className={styles.tableArea}> 
+          <h3>Interaction Scores ({apiScopeName || currentScope})</h3> 
+          <AnalysisTable
+            data={combinedData}
+            columns={combinedColumns}
+            onRowClick={handleTableRowClick} 
+            selectedRowIndex={selectedRowIndex} 
+            loading={isLoadingInteractionViz}
+          />
+        </div>
+      )} 
+
+      {/* Always render the visualization area, it will expand if table is hidden */}
       <div className={styles.visualizationArea}> 
         <h3>
-            {currentScope === 'custom' 
-                ? 'Spatial Overview' 
-                : `Interaction Visualization (${selectedPair ? selectedPair.join('-') : 'No Pair Selected'})`}
+          {currentScope === 'custom' 
+              ? 'Spatial Overview (Select Region)' // Updated title for clarity
+              : `Interaction Visualization (${selectedPair ? selectedPair.join('-') : 'No Pair Selected'})`}
         </h3>
         {renderVisualization()}
       </div>
