@@ -5,24 +5,17 @@ import asyncio
 import uuid
 import json
 import logging
-import pandas as pd # Import pandas for DataFrame creation
+import pandas as pd
+from shapely.geometry import Point, Polygon # Import Shapely
 
 # Import JobService and AnalysisService
 from app.services.job_service import JobService, get_job_service
-# Only import the class, not the non-existent dependency function from the service file
 from app.services.analysis_service import AnalysisService
-# Import models from the correct location
 from app.models.analysis_models import AnalysisMapping, AnalysisPayload, CustomLassoAnalysisRequest, CustomAnalysisResponse
-
-# Assuming core analysis logic is importable
-# from ..analysis_logic.core import run_analysis_pipeline # Placeholder - core logic needs adaptation
-
-# REMOVING unused imports that were causing ModuleNotFoundError
-# from ..utils.task_manager import TaskManager, TaskStatus 
-# from ..utils.file_manager import FileManager, get_file_manager, get_task_manager
-
-# REMOVING import from non-existent data_models module
-# from .data_models import AnalysisRequest, FileMapping, JobStatusResponse, AnalysisResult # Assuming existing data_models
+# Import core analysis logic directly
+from app.analysis_logic.core import run_stage1_counts_pipeline, run_pathway_dominance_pipeline, run_module_context_pipeline
+# Import FileService class instead of the specific function
+from app.services.file_service import FileService 
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +66,7 @@ async def get_job_context_endpoint(job_id: str, job_service: JobService = Depend
     This now retrieves the job's status dictionary and extracts the 'results' field.
     """
     full_status = job_service.get_job_context(job_id) # Renamed variable for clarity
-    if full_status is None: 
+    if full_status is None:
         # Check if the job *exists* first for a better error message
         if not job_service.job_exists(job_id):
              raise HTTPException(status_code=404, detail=f"Job ID {job_id} not found")
@@ -157,50 +150,158 @@ async def start_analysis_endpoint(
 # async def start_custom_selection_analysis(...):
 #    ...
 
-@router.post("/custom/{job_id}", 
+@router.post("/custom/{job_id}",
              response_model=CustomAnalysisResponse, # Specify response model
              summary="Run Analysis on Custom Lasso Selection",
              description="Filters the original spatial data using the provided polygon and runs the analysis pipeline on the subset.")
 async def run_custom_analysis_endpoint(
-    job_id: str, 
-    request: CustomLassoAnalysisRequest, # Use the new request model
-    analysis_service: AnalysisService = Depends(get_analysis_service), # Inject service
-    job_service: JobService = Depends(get_job_service) # Inject job service for context?
+    job_id: str,
+    request: CustomLassoAnalysisRequest, # Use the existing request model
+    job_service: JobService = Depends(get_job_service) # Inject job service for context
+    # AnalysisService not directly needed here as we call core logic
 ):
-    """Endpoint to run analysis on a user-defined spatial subset."""
+    """Endpoint to run analysis synchronously on a user-defined spatial subset."""
+    logger.info(f"Received custom analysis request for job {job_id}.")
+    if len(request.polygon) < 4:
+        raise HTTPException(status_code=400, detail="Polygon must have at least 4 points (first and last the same).")
+    if request.polygon[0] != request.polygon[-1]:
+         raise HTTPException(status_code=400, detail="Polygon first and last points must be the same.")
+
     try:
-        print(f"Received custom analysis request for job {job_id} with polygon vertex count: {len(request.polygon)}")
-        # We might need the original job context (file IDs, mappings) 
-        # Option 1: Fetch context using job_service
-        initial_context = await job_service.get_job_context(job_id)
-        if not initial_context:
-            raise HTTPException(status_code=404, detail=f"Original job context not found for job ID: {job_id}")
+        # 1. Get original job context (contains file IDs and mappings)
+        job_context = job_service.get_job_context(job_id) # Fetch the whole job document
+        if not job_context or 'results' not in job_context or 'inputs' not in job_context['results']:
+             logger.error(f"Job context or results/inputs missing for job {job_id}.")
+             raise HTTPException(status_code=404, detail=f"Original job context/inputs not found for job ID: {job_id}")
 
-        # Ensure we have necessary info (e.g., file IDs from context)
-        # This depends on what `run_custom_analysis` needs
-        # Example: 
-        # spatial_file_id = initial_context.get('inputs', {}).get('files', {}).get('spatialFileId')
-        # if not spatial_file_id:
-        #     raise HTTPException(status_code=400, detail="Spatial file ID missing from original job context.")
+        # Extract inputs (file IDs and mappings)
+        inputs = job_context['results']['inputs']
+        spatial_file_id = inputs.get('files', {}).get('spatialFileId')
+        interactions_file_id = inputs.get('files', {}).get('interactionsFileId')
+        modules_file_id = inputs.get('files', {}).get('modulesFileId')
+        spatial_mapping = inputs.get('mappings', {}).get('spatialMapping', {})
+        interactions_mapping = inputs.get('mappings', {}).get('interactionsMapping', {})
+        modules_mapping = inputs.get('mappings', {}).get('modulesMapping', {})
 
-        results = await analysis_service.run_custom_analysis(
-            original_job_id=job_id, 
-            polygon_coords=request.polygon,
-            initial_context=initial_context # Pass context if needed by service
+        # Validate required inputs
+        if not all([spatial_file_id, interactions_file_id, modules_file_id,
+                    spatial_mapping, interactions_mapping, modules_mapping]):
+            logger.error(f"Missing file IDs or mappings in job context for {job_id}.")
+            raise HTTPException(status_code=400, detail="Missing required file IDs or mappings in original job context.")
+
+        x_col = spatial_mapping.get('xCol')
+        y_col = spatial_mapping.get('yCol')
+        gene_col_spatial = spatial_mapping.get('geneCol')
+        layer_col = spatial_mapping.get('layerCol')
+        ligand_col = interactions_mapping.get('ligandCol')
+        receptor_col = interactions_mapping.get('receptorCol')
+        gene_col_modules = modules_mapping.get('geneCol')
+        module_col = modules_mapping.get('moduleCol')
+
+        if not all([x_col, y_col, gene_col_spatial, layer_col, ligand_col, receptor_col, gene_col_modules, module_col]):
+             logger.error(f"Missing specific column names in mappings for job {job_id}.")
+             raise HTTPException(status_code=400, detail="One or more required column names (x, y, layer, gene, ligand, receptor, module) are missing in the mappings.")
+
+        # 2. Load dataframes (Call class method on FileService)
+        try:
+            spatial_path = FileService.get_file_path(spatial_file_id)
+            interactions_path = FileService.get_file_path(interactions_file_id)
+            modules_path = FileService.get_file_path(modules_file_id)
+
+            # Convert Path objects to strings for pandas
+            df_spatial_full = pd.read_csv(str(spatial_path))
+            df_interactions = pd.read_csv(str(interactions_path))
+            df_modules = pd.read_csv(str(modules_path))
+        except FileNotFoundError as e:
+             logger.error(f"Data file not found for job {job_id}: {e}")
+             raise HTTPException(status_code=404, detail=f"One of the original data files could not be found: {e}")
+        except Exception as e:
+             logger.error(f"Error loading dataframes for job {job_id}: {e}")
+             raise HTTPException(status_code=500, detail=f"Failed to load data files: {e}")
+
+        # 3. Filter spatial data using Shapely polygon
+        logger.info(f"Filtering spatial data ({len(df_spatial_full)} points) using polygon...")
+        selection_polygon = Polygon(request.polygon)
+
+        # Function to check if a point is inside the polygon
+        def is_inside(row):
+            point = Point(row[x_col], row[y_col])
+            return selection_polygon.contains(point)
+
+        df_spatial_filtered = df_spatial_full[df_spatial_full.apply(is_inside, axis=1)].copy()
+        logger.info(f"Filtered spatial data contains {len(df_spatial_filtered)} points.")
+
+        if df_spatial_filtered.empty:
+             logger.warning(f"No spatial points found within the provided polygon for job {job_id}.")
+             # Return empty results as analysis cannot run
+             return CustomAnalysisResponse(pathway_dominance=[], module_context=[])
+
+
+        # 4. Run analysis pipeline stages
+        logger.info("Running Stage 1: Counts Pipeline...")
+        # Corrected arguments for stage 1
+        counts_results = run_stage1_counts_pipeline(
+            spatial_df=df_spatial_filtered, 
+            interactions_df=df_interactions
+            # Removed extra args: gene_col, layer_col, ligand_col, receptor_col
         )
-        
-        print(f"Custom analysis completed for job {job_id}.")
-        return results # Should match CustomAnalysisResponse structure
+        # Ensure stage 1 output is suitable for stage 2 (e.g., contains 'ligand_norm_expr' etc.)
+        # This might require checking the return value of run_stage1...
+        # For now, assuming counts_results['whole_tissue'] is the relevant DataFrame
+        if 'whole_tissue' not in counts_results:
+             logger.error("Stage 1 did not produce 'whole_tissue' results for custom analysis.")
+             raise HTTPException(status_code=500, detail="Analysis Stage 1 failed for the selection.")
+        df_counts = counts_results['whole_tissue'] # Use the counts for the filtered region
 
-    except FileNotFoundError as e:
-        print(f"Error during custom analysis for job {job_id}: {e}")
-        raise HTTPException(status_code=404, detail=str(e))
-    except ValueError as e:
-        print(f"Value error during custom analysis for job {job_id}: {e}")
-        raise HTTPException(status_code=400, detail=str(e)) 
+        logger.info("Running Stage 2: Pathway Dominance...")
+        # Corrected: Pass the filtered spatial df and interactions df
+        pathway_results_dict = run_pathway_dominance_pipeline(
+            spatial_df=df_spatial_filtered,
+            interactions_df=df_interactions 
+        )
+        # Pathway dominance pipeline returns results per scope (even if only one)
+        # Assuming the result for our custom scope is under a key like 'whole_tissue' or similar
+        # We need to adapt this based on how _calculate_pathway_dominance_for_scope is used
+        # For now, let's assume it returns results for a single scope (our filtered data)
+        # and we need the list directly. We might need to adjust core.py or this call.
+        # Let's try getting the list; this might need adjustment!
+        pathway_results = pathway_results_dict.get('whole_tissue', []) # Tentative extraction
+        if not pathway_results:
+             logger.warning(f"Pathway dominance did not return expected results for custom selection {job_id}.")
+             # Decide how to handle - maybe return empty results? For now, proceed.
+             pathway_results = [] 
+
+        logger.info("Running Stage 3: Module Context...")
+        # Corrected: Pass interactions, modules, and the *list* of pathway results
+        # Also add spatial_df to match signature, even if not strictly used for single custom scope
+        module_results_dict = run_module_context_pipeline(
+            spatial_df=df_spatial_filtered, # Added to match signature 
+            interactions_df=df_interactions,
+            modules_df=df_modules,
+            # Pass the list of pathway results, not the dict containing it
+            full_pathway_results={'custom': {'pathway_dominance': pathway_results}} # Structure it as expected
+        )
+        # Similar extraction needed for module results
+        module_results = module_results_dict.get('custom', []) # Tentative extraction
+        if not module_results:
+             logger.warning(f"Module context did not return expected results for custom selection {job_id}.")
+             module_results = []
+
+        # 5. Combine and structure results
+        # Now pathway_results and module_results should be lists of dicts
+
+        # 6. Return structured response
+        logger.info(f"Custom analysis completed for job {job_id}. Returning {len(module_results)} module results.")
+        return CustomAnalysisResponse(
+             pathway_dominance=pathway_results,
+             module_context=module_results
+        )
+
+    except HTTPException as e:
+         # Re-raise HTTP exceptions
+         raise e
     except Exception as e:
-        print(f"Unexpected error during custom analysis for job {job_id}: {e}")
-        # Log the full traceback for unexpected errors
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}") 
+        logger.exception(f"Unexpected error during custom analysis for job {job_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"An internal error occurred during custom analysis: {str(e)}")
+
+# --- Other potential helper functions or endpoints --- 

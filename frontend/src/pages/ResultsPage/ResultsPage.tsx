@@ -187,8 +187,8 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
       setCustomAnalysisResults(null);
 
       try {
-          // TODO: Implement API call to backend
-          const apiUrl = `/api/analysis/custom/${jobId}`; // Example endpoint
+          // MODIFIED: Correct API endpoint path
+          const apiUrl = `/api/analysis/custom/${jobId}`; 
           const response = await fetch(apiUrl, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -334,20 +334,45 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
       {/* Content Area - Render based on selected scope */}
       <div className={styles.contentArea}>
           {selectedScope === 'custom' ? (
-              // Render Spatial Overview for Custom Selection
-              <div className={styles.spatialOverviewArea}> {/* Reuse existing styling if appropriate */} 
-                  {jobId && (
-                      <SpatialOverviewVisualization 
-                          jobId={jobId} // Pass jobId, component will get data via hook
-                          onLassoSelect={handleLassoSelect}
-                          onAnalyzeSelection={handleAnalyzeLasso}
-                          // REMOVE props related to points/loading/error
-                          // points={spatialPoints} 
-                          // isLoading={isSpatialLoading} 
-                          // error={spatialError} 
-                          // totalPointsReceived={spatialPointsReceived}
-                      />
-                  )}
+              // Render Spatial Overview PLUS Loading/Results/Error Area
+              <div className={styles.customScopeLayout}> {/* Use a specific layout class */}
+                  <div className={styles.spatialOverviewAreaCustom}> {/* Specific class for spatial in custom */} 
+                      {jobId && (
+                          <SpatialOverviewVisualization 
+                              jobId={jobId}
+                              onLassoSelect={handleLassoSelect}
+                              onAnalyzeSelection={handleAnalyzeLasso}
+                          />
+                      )}
+                  </div>
+                  <div className={styles.customResultsArea}> {/* Area below spatial for results/loading */} 
+                      {isLoadingCustomAnalysis ? (
+                          <div className={styles.loadingContainer}> 
+                              <LoadingSpinner message="Running custom analysis..." />
+                          </div>
+                      ) : customAnalysisError ? (
+                          <p className={styles.errorText}>Error during custom analysis: {customAnalysisError}</p>
+                      ) : customAnalysisResults ? (
+                           // Pass custom results to SummaryTabContent for display
+                           // Note: SummaryTabContent might need internal adaptation 
+                           // to handle receiving custom results this way.
+                           <SummaryTabContent 
+                                jobId={jobId || ''} 
+                                combinedData={[]} // Pass empty for original data
+                                selectedPair={selectedPair}
+                                onSelectPair={handleSelectPair}
+                                apiScopeName={null} // No API scope for custom results display
+                                currentScope={selectedScope} 
+                                // Don't pass lasso/analyze handlers down again
+                                customAnalysisResults={customAnalysisResults} 
+                                isLoadingCustomAnalysis={false} // Already handled loading above
+                                customAnalysisError={null} // Already handled error above
+                            />
+                      ) : (
+                          // Initial state before analysis is run
+                          <p className={styles.placeholderText}>Select a region in the spatial view and click 'Analyze Selection'.</p>
+                      )}
+                  </div>
               </div>
           ) : (
               // Render Summary Table/Interaction Viz Area for other scopes
@@ -359,11 +384,13 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
                         onSelectPair={handleSelectPair}
                         apiScopeName={scopeForApi} 
                         currentScope={selectedScope} 
-                        onLassoSelect={handleLassoSelect}
-                        onAnalyzeSelection={handleAnalyzeLasso} // ADDED prop
-                        customAnalysisResults={customAnalysisResults} // ADDED prop
-                        isLoadingCustomAnalysis={isLoadingCustomAnalysis} // ADDED prop
-                        customAnalysisError={customAnalysisError} // ADDED prop
+                        // Pass lasso/analyze handlers only for non-custom scopes implicitly via SummaryTab
+                        // onLassoSelect={handleLassoSelect} // Removed, SummaryTab doesn't need it directly?
+                        // onAnalyzeSelection={handleAnalyzeLasso} // Removed, SummaryTab doesn't trigger this
+                        // Pass null for custom state when not in custom scope
+                        customAnalysisResults={null} 
+                        isLoadingCustomAnalysis={false} 
+                        customAnalysisError={null} 
                     />
               </div>
           )}

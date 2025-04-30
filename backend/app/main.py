@@ -36,7 +36,7 @@ app.add_middleware(
 
 # Include routers
 # File routes for initial upload and management
-app.include_router(file_routes.router, prefix="/api/files", tags=["Files"]) 
+app.include_router(file_routes.router, prefix="/api/files", tags=["Files"])
 # Analysis job creation and custom analysis computation
 app.include_router(analysis_routes.router, prefix="/api", tags=["Analysis"])
 # Visualization routes for retrieving visualization data - REMOVED

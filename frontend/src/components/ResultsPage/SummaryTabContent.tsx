@@ -7,6 +7,7 @@ import { CombinedInteractionData } from '../../pages/ResultsPage/ResultsPage'; /
 import { ScopeType } from '../ScopeSelector/ScopeSelector'; // Import ScopeType if defined there
 import useInteractionData from '../../hooks/useInteractionData'; // Import the hook
 import { PathwayDominanceResult, ModuleContextResult } from '../../types/analysisResults'; // ADDED import
+import LoadingSpinner from '../LoadingSpinner/LoadingSpinner'; // ADDED import for loading state
 
 // Type for the data returned by the new /api/points/{jobId}/all endpoint
 interface AllPointsData {
@@ -186,17 +187,19 @@ const SummaryTabContent: React.FC<SummaryTabContentProps> = ({
   // Helper to render the correct component based on scope and custom results
   const renderContent = () => {
     if (currentScope === 'custom') {
+        // Show loading spinner first if custom analysis is running
         if (isLoadingCustomAnalysis) {
             return (
-                <div className={styles.loadingContainer}>
-                  <p>Running custom analysis...</p>
-                  {/* TODO: Add cancel button for custom analysis API call? */}
+                <div className={styles.loadingContainer}> 
+                    <LoadingSpinner message="Running custom analysis..." />
                 </div>
             );
         }
+        // If not loading, check for errors
         if (customAnalysisError) {
             return <p className={styles.errorText}>Error during custom analysis: {customAnalysisError}</p>;
         }
+        // If not loading and no error, check for results
         if (customAnalysisResults) {
             // Display results similar to non-custom scope
             // We need to process customAnalysisResults into CombinedInteractionData format

@@ -21,3 +21,5 @@ pyzmq
 # Added for custom lasso analysis spatial filtering
 geopandas
 shapely
+
+shapely
