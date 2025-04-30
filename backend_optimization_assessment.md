@@ -1,8 +1,21 @@
-# GliaGrid Backend Architecture Assessment
+# GliaGrid Architecture & Performance Optimization Plan
 
-## Current Architecture Overview
+## Table of Contents
+1. [Current Architecture Assessment](#current-architecture-assessment)
+2. [Performance Bottlenecks](#performance-bottlenecks)
+3. [Optimization Strategy](#optimization-strategy)
+4. [Implementation Roadmap](#implementation-roadmap)
+   - [Phase 1: Data Access Optimization](#phase-1-data-access-optimization-1-2-weeks)
+   - [Phase 2: Shared Data Management](#phase-2-shared-data-management-1-week)
+   - [Phase 3: Visualization Enhancements](#phase-3-visualization-enhancements-1-week)
+5. [Technical Implementation Details](#technical-implementation-details)
+   - [Backend Optimizations](#backend-optimizations)
+   - [Electron Integration](#electron-integration)
+   - [Frontend Components](#frontend-components)
 
-The backend appears well-organized with a clean separation of concerns:
+## Current Architecture Assessment
+
+The backend is organized with a clean separation of concerns:
 
 1. **API Layer** (`backend/app/api/`):
    - `analysis_routes.py`: Handles analysis job submission and status
@@ -12,250 +25,168 @@ The backend appears well-organized with a clean separation of concerns:
 2. **Service Layer** (`backend/app/services/`):
    - `analysis_service.py`: Coordinates the analysis workflow
    - `job_service.py`: Manages job state (in-memory)
-   - `file_service.py`: Handles file storage and processing
+   - `file_service.py`: Handles file storage and processing (in `.temp_uploads/`)
 
 3. **Core Analysis** (`backend/app/analysis_logic/`):
    - `core.py`: Contains the computational pipeline for data analysis
 
-4. **Data Models** (`backend/app/models/`):
-   - `analysis_models.py`: Defines data structures
-   - `file_data.py`: Defines file-related data structures
+4. **Frontend Visualization Components**:
+   - `SpatialOverviewVisualization`: Shows all spatial points with layer filtering, handles lasso selection
+   - `InteractionVisualization`: Shows ligand-receptor interactions based on selection
 
-## Key Bottlenecks Identified
+5. **Electron Integration**:
+   - Projects are saved as JSON files in `app.getPath('userData')/projects/`
+   - Projects store references to backend file IDs
+   - Projects can be loaded/deleted through Electron IPC channels
+   - No direct file access from Electron to backend storage
+
+## Performance Bottlenecks
 
 1. **Memory Management**:
-   - The entire spatial dataset (potentially 9M rows) is loaded into memory
+   - The entire spatial dataset (9M rows) is loaded into memory
    - No chunking/streaming for large files
    - No spatial indexing for efficient area selection
 
 2. **Redundant Processing**:
    - No caching mechanism for processed data
-   - Reloading and reprocessing files on each request
+   - Files reloaded and reprocessed on each request
    - Lack of pre-computed views for visualization
 
-3. **State Management**:
-   - In-memory job state (lost on server restart)
-   - No client-side persistence
+3. **Data Transfer Inefficiency**:
+   - All data flows through HTTP API, even in Electron
+   - No progressive loading or resolution control
+   - No direct file access despite Electron capabilities
 
-4. **Visualization Data Flow**:
-   - Inefficient fetching of all points for visualization
-   - No progressive loading or level-of-detail
+4. **Visualization Rendering**:
+   - No WebGL optimizations for large point datasets
+   - All points rendered at once instead of level-of-detail approach
+   - Heavy components not lazily initialized
 
-## Architectural Recommendations
+## Optimization Strategy
 
-### 1. Data Processing Architecture
+The optimization strategy focuses on three key approaches:
 
-#### Current Flow:
-```
-Frontend -> API -> AnalysisService -> Load full files -> Process all data -> Return results
-```
+1. **Priority Queue Data Loading**:
+   - Start with low-resolution samples (~10%) for immediate feedback
+   - Queue full dataset loading in background with cancellable requests
+   - Prioritize user-requested regions/interactions
+   - Track loaded chunks to prevent duplicate loading
 
-#### Recommended Flow:
-```
-Frontend -> Check local cache -> If missing -> API request with specific needs -> 
-Backend serves chunked/indexed data -> Frontend caches and processes
-```
+2. **Balanced Workload Distribution**:
 
-### 2. Modular Service Improvements
+   | Processing Stage | FastAPI Backend | Electron Frontend |
+   |------------------|----------------|-------------------|
+   | Initial file parsing | ✅ (Python's data science ecosystem) | ⚠️ (Only for previews) |
+   | Heavy analysis algorithms | ✅ (Optimized with NumPy/pandas) | ❌ (Keep in Python) |
+   | Data serving | ✅ (Optimized, compressed) | ❌ (Request from backend) |
+   | File I/O after initial analysis | ❌ (Network bottleneck) | ✅ (Direct file access) |
+   | Visualization processing | ❌ (Send minimal data) | ✅ (Transform locally) |
+   | Selection & filtering | ❌ (Except complex queries) | ✅ (Fast on pre-loaded data) |
+   | Caching & persistence | ⚠️ (Job results only) | ✅ (All processed data) |
 
-#### A. Enhanced FileService
+3. **Shared Data Architecture**:
 
-```python
-class EnhancedFileService:
-    """Handles file operations with performance optimizations."""
-    
-    @classmethod
-    def get_chunked_data(cls, file_id: str, offset: int, limit: int) -> pd.DataFrame:
-        """Reads a specific chunk of data from a file."""
-        pass
-        
-    @classmethod
-    def get_spatial_points_in_region(cls, file_id: str, bounding_box: dict) -> pd.DataFrame:
-        """Efficiently retrieves only points within a specific region."""
-        pass
-        
-    @classmethod
-    def precompute_visualization_data(cls, file_id: str) -> Dict[str, Any]:
-        """Precomputes data needed for visualization during initial analysis."""
-        pass
-        
-    @classmethod
-    def create_spatial_index(cls, file_id: str) -> None:
-        """Creates an R-tree spatial index for the file to enable efficient spatial queries."""
-        pass
-```
+   ```
+   ┌─────────────────┐         ┌───────────────────┐         ┌───────────────────┐
+   │                 │         │                   │         │                   │
+   │ Backend (9M pts)│ ───────▶│ Shared Data Store │────────▶│ Custom Selection  │
+   │                 │         │                   │         │                   │
+   └─────────────────┘         └───────────────────┘         └───────────────────┘
+                                        │                              ▲
+                                        │                              │
+                                        ▼                              │
+                                 ┌─────────────┐                ┌─────────────┐
+                                 │             │                │             │
+                                 │ Spatial     │────────────────│ Interaction │
+                                 │ Overview    │                │ Viz         │
+                                 │             │                │             │
+                                 └─────────────┘                └─────────────┘
+   ```
 
-#### B. Persistent JobService
+## Implementation Roadmap
 
-```python
-class PersistentJobService:
-    """Manages job state with persistence."""
-    
-    def __init__(self, storage_path: str):
-        """Initialize with a path for persistent storage."""
-        self.storage_path = storage_path
-        self._load_state()
-        
-    def _load_state(self) -> None:
-        """Load job state from disk."""
-        pass
-        
-    def _save_state(self) -> None:
-        """Save job state to disk."""
-        pass
-    
-    def create_precomputed_assets(self, job_id: str) -> Dict[str, Any]:
-        """Generate assets for client-side storage."""
-        pass
-```
+### Phase 1: Data Access Optimization (1-2 weeks)
 
-#### C. DataProcessingService
+1. **Backend Chunked Processing**:
+   - Modify `FileService` to support chunked data retrieval
+   - Add spatial indexing for region queries
+   - Implement resolution parameter in visualization API endpoints
 
-```python
-class DataProcessingService:
-    """Handles data transformation and processing."""
-    
-    @staticmethod
-    def create_multi_resolution_data(df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
-        """Creates multiple resolution samples of the dataset."""
-        pass
-        
-    @staticmethod
-    def run_algorithm_on_subset(points: List[Dict], algorithm: str) -> Any:
-        """Runs a specific algorithm on a subset of points."""
-        pass
-```
+2. **Direct File Access in Electron**:
+   - Create IPC handlers for reading backend files
+   - Implement chunked CSV parsing
+   - Add resolution/sampling parameters
 
-### 3. API Endpoint Improvements
+3. **API Endpoints Enhancement**:
+   - Add metadata endpoint to return file information
+   - Update points endpoint to support resolution and regions
+   - Implement job data file path endpoints
 
-#### A. Enhanced Points Endpoint
+### Phase 2: Shared Data Management (1 week)
 
-```python
-@router.get("/points/{job_id}")
-async def get_points(
-    job_id: str,
-    resolution: float = Query(1.0, description="Data resolution (0.1 to 1.0)"),
-    region: str = Query(None, description="JSON bounding box for spatial filtering"),
-    limit: int = Query(1000, description="Maximum points to return")
-):
-    """Get spatial points with resolution control and region filtering."""
-```
+1. **Frontend Data Store**:
+   - Create SharedDataStore singleton
+   - Implement multi-level caching (memory and persistent)
+   - Add priority queue for data requests
 
-#### B. Progressive Loading API
+2. **Electron Background Processing**:
+   - Setup worker threads for processing
+   - Implement spatial operations in main process
+   - Add IPC channels for communication
 
-```python
-@router.get("/points/{job_id}/progressive")
-async def get_progressive_points(
-    job_id: str,
-    zoom_level: int = Query(..., description="Zoom level (1-10)"),
-    viewport: str = Query(..., description="JSON viewport coordinates")
-):
-    """Returns appropriate detail level based on zoom."""
-```
+3. **Data Flow Optimization**:
+   - Connect components to shared data store
+   - Implement data transformation pipelines
+   - Add selection caching
 
-#### C. Custom Selection Analysis API
+### Phase 3: Visualization Enhancements (1 week)
 
-```python
-@router.post("/analysis/custom/{job_id}")
-async def analyze_custom_selection(
-    job_id: str,
-    selection: CustomSelectionRequest,
-    background_tasks: BackgroundTasks,
-    compute_location: str = Query("server", description="Where to perform computation (server/client)")
-):
-    """Analyze a custom selection with location preference."""
-```
-
-### 4. Client-Side Processing with Electron
-
-#### A. Direct File Access
-
-```typescript
-// electron/main.js
-ipcMain.handle('read-spatial-file-raw', async (event, filePath, options) => {
-  // Read data directly from disk in Node.js process
-  // Return only what's needed based on options
-})
-```
-
-#### B. Background Processing
-
-```typescript
-// electron/background.js
-function processDataInBackground(data, algorithm) {
-  // Heavy computation in Node.js process
-  // Return results via IPC
-}
-```
-
-#### C. Client-Side Caching
-
-```typescript
-// frontend/src/services/localStorageService.ts
-export async function cacheProcessedData(jobId: string, data: any): Promise<void> {
-  // Store data in IndexedDB or local file system
-}
-
-export async function getProcessedData(jobId: string): Promise<any> {
-  // Retrieve cached data if available
-}
-```
-
-## Implementation Strategy
-
-### Phase 1: Backend Optimization
-
-1. **Immediate Performance Improvements**:
-   - Implement chunked file reading in `FileService._load_and_standardize`
-   - Add resolution parameter to `/points/{jobId}/all` endpoint
-   - Create spatial indexing for point data
-
-2. **Persistent State**:
-   - Extend `JobService` with file-based persistence
-   - Add pre-computed results storage
-
-### Phase 2: Client-Side Integration
-
-1. **Electron IPC Channels**:
-   - Create direct file access methods
-   - Implement background processing workers
-
-2. **Frontend Data Management**:
-   - Build caching layer for processed data
-   - Add state persistence between sessions
-
-### Phase 3: Advanced Visualization
-
-1. **Multi-Resolution Data**:
-   - Generate tile pyramids for spatial data
-   - Implement level-of-detail rendering
+1. **WebGL Optimizations**:
+   - Implement instanced rendering
+   - Add level-of-detail based on zoom
+   - Use binary formats for GPU transfer
 
 2. **Progressive Loading**:
-   - Create APIs for viewport-based data fetching
-   - Implement streaming data processing
+   - Update components to support resolution switching
+   - Implement viewport-based filtering
+   - Add loading indicators with progressive enhancement
 
-## Specific Technical Implementations
+3. **Component Optimizations**:
+   - Add lazy initialization for heavy components
+   - Implement shared layer boundary caching
+   - Precompute visualization transformations
 
-### 1. Memory-Efficient Point Loading
+## Technical Implementation Details
+
+### Backend Optimizations
+
+#### Memory-Efficient Point Loading
 
 ```python
-def load_points_efficient(file_path, chunk_size=10000):
-    """Process large spatial files in chunks."""
-    for chunk in pd.read_csv(file_path, chunksize=chunk_size):
-        # Process each chunk 
-        yield chunk
-
-# Usage in endpoints
-@router.get("/points/{job_id}/all")
-async def get_all_points_data(job_id: str, resolution: float = 1.0):
-    """Get points data with controllable resolution."""
-    # Implement sampling based on resolution
+def load_points_efficient(file_path, chunk_size=10000, resolution=1.0):
+    """Process large spatial files in chunks with resolution control."""
+    # Calculate total rows
+    total_rows = sum(1 for _ in open(file_path)) - 1  # Subtract header
+    
+    # Apply resolution sampling if needed
     if resolution < 1.0:
-        sample_size = int(total_points * resolution)
-        return random_sample(points, sample_size)
+        sample_size = int(total_rows * resolution)
+        sample_indices = set(random.sample(range(total_rows), sample_size))
+        
+    # Process in chunks
+    result = []
+    for i, chunk in enumerate(pd.read_csv(file_path, chunksize=chunk_size)):
+        # Apply resolution filtering if needed
+        if resolution < 1.0:
+            start_idx = i * chunk_size
+            chunk = chunk.iloc[[idx - start_idx for idx in sample_indices 
+                               if start_idx <= idx < start_idx + len(chunk)]]
+        result.append(chunk)
+        
+    return pd.concat(result) if result else pd.DataFrame()
 ```
 
-### 2. Spatial Indexing with PyRTree
+#### Spatial Indexing
 
 ```python
 from rtree import index
@@ -273,564 +204,339 @@ class SpatialIndex:
         return self.points_df.iloc[ids]
 ```
 
-### 3. Electron Direct File Access
-
-```typescript
-// Add to preload.js
-contextBridge.exposeInMainWorld('electron', {
-  readSpatialFile: (filePath, options) => ipcRenderer.invoke('read-spatial-file', filePath, options),
-  saveCachedResults: (jobId, data) => ipcRenderer.invoke('save-cached-results', jobId, data),
-  loadCachedResults: (jobId) => ipcRenderer.invoke('load-cached-results', jobId)
-})
-
-// Main process implementation
-ipcMain.handle('read-spatial-file', async (_, filePath, options) => {
-  const { resolution, region } = options
-  // Use efficient Node.js file operations
-  // Return appropriate data based on options
-})
-```
-
-## Priority Queue Approach for Data Loading
-
-One optimal strategy for balancing initial data loading with responsive user interactions is implementing a priority queue for data loading:
-
-### 1. Initial Load Strategy
-
-- Load a low-resolution sample (~5-10%) of all points immediately
-- Begin background loading of all points in chunks
-- Store loaded chunk IDs to prevent duplication
-
-### 2. Request Prioritization
-
-- When user selects an area or needs specific points, interrupt background loading
-- Load requested region at high priority
-- Resume background loading where it left off
-
-### 3. Implementation Pattern
-
-```typescript
-class DataLoadManager {
-  private loadQueue = new PriorityQueue();
-  private loadedChunkIds = new Set();
-  private isLoading = false;
-
-  // Add region to load queue with priority
-  requestRegion(region, priority) {
-    this.loadQueue.add({ region, priority });
-    if (!this.isLoading) this.processQueue();
-  }
-
-  async processQueue() {
-    this.isLoading = true;
-    while (!this.loadQueue.isEmpty()) {
-      const { region, priority } = this.loadQueue.pop();
-      const chunks = this.getChunksForRegion(region);
-      
-      // Skip already loaded chunks
-      const chunksToLoad = chunks.filter(c => !this.loadedChunkIds.has(c.id));
-      await this.loadChunks(chunksToLoad);
-      
-      // Mark as loaded
-      chunksToLoad.forEach(c => this.loadedChunkIds.add(c.id));
-    }
-    this.isLoading = false;
-  }
-}
-```
-
-This approach enables responsive UI while progressively building the complete dataset. The initial pipeline could run with a small sample, then continue loading in the background while allowing immediate responses to user interactions.
-
-## Optimizations for Current Implementation
-
-After reviewing the core visualization components (`SpatialOverviewVisualization` and `InteractionVisualization`), I can provide more targeted optimization recommendations:
-
-### 1. Data Storage Architecture
-
-The current implementation has two primary visualization components:
-- **SpatialOverviewVisualization**: Shows all spatial points with layer filtering, handles lasso selection
-- **InteractionVisualization**: Shows ligand-receptor interactions based on selection
-
-These components need different views of the same underlying spatial data, which creates an opportunity for shared data storage:
-
-```
-┌─────────────────┐         ┌───────────────────┐         ┌───────────────────┐
-│                 │         │                   │         │                   │
-│ Backend (9M pts)│ ───────▶│ Shared Data Store │────────▶│ Custom Selection  │
-│                 │         │                   │         │                   │
-└─────────────────┘         └───────────────────┘         └───────────────────┘
-                                     │                              ▲
-                                     │                              │
-                                     ▼                              │
-                              ┌─────────────┐                ┌─────────────┐
-                              │             │                │             │
-                              │ Spatial     │                │ Interaction │
-                              │ Overview    │────────────────│ Viz         │
-                              │             │                │             │
-                              └─────────────┘                └─────────────┘
-```
-
-### 2. Priority-Based Data Loading for Shared Storage
-
-The priority queue approach can work across both components:
-
-```typescript
-class SharedSpatialDataStore {
-  // In-memory storage of loaded data
-  private loadedPoints: Record<string, AllPointsData[]> = {};
-  private loadedChunks: Set<string> = new Set();
-  private priorityQueue = new PriorityQueue<DataLoadRequest>();
-  
-  // Key methods
-  async requestAllPoints(jobId: string) {
-    // Queue low-priority request for all points
-    this.enqueue({
-      jobId,
-      type: 'all',
-      priority: 'low'
-    });
-    
-    // Start with a low-resolution sample
-    return this.fetchSample(jobId, 0.1);
-  }
-  
-  async requestInteractionPoints(jobId: string, ligand: string, receptor: string) {
-    // High priority - needed for user-initiated interaction view
-    this.enqueue({
-      jobId,
-      type: 'interaction',
-      ligand,
-      receptor,
-      priority: 'high'
-    });
-    
-    // Check if we already have these points cached
-    return this.getCachedInteractionPoints(jobId, ligand, receptor) ||
-           this.fetchInteractionPoints(jobId, ligand, receptor);
-  }
-  
-  async requestLassoSelection(jobId: string, polygon: Point[]) {
-    // Highest priority - immediate user action
-    this.enqueue({
-      jobId,
-      type: 'lasso',
-      region: polygon, 
-      priority: 'highest'
-    });
-    
-    // Use spatial index if available or fetch from backend
-    return this.getSpatialPointsInPolygon(jobId, polygon);
-  }
-}
-```
-
-### 3. Avoiding Redundant Computation
-
-For the custom selection feature, we can store already processed data:
-
-```typescript
-// After a lasso selection is made
-async function handleLassoSelect(polygon: Point[]) {
-  // 1. Get points in selection
-  const selectedPoints = await dataStore.requestLassoSelection(jobId, polygon);
-  
-  // 2. Store selection for future reference
-  dataStore.storeSelection('current', selectedPoints);
-  
-  // 3. When interaction viz needs this data later, it can use:
-  const cachedSelection = dataStore.getStoredSelection('current');
-  
-  // 4. Filter cached selection for specific ligand/receptor
-  const { ligandPoints, receptorPoints } = dataStore.filterSelectionForInteraction(
-    cachedSelection,
-    currentLigand,
-    currentReceptor
-  );
-}
-```
-
-### 4. Implementation in Current Components
-
-The `SpatialOverviewVisualization` component would:
-1. Request low-resolution sample initially (~10% of points)
-2. Start background loading of all points in chunks
-3. Immediately render what's available
-4. Update as more chunks arrive
-
-The `InteractionVisualization` component would:
-1. First check if points for current ligand/receptor are in shared store
-2. Fall back to API if not found
-3. Store results back in shared store
-
-## FastAPI vs Electron: Optimizing the Architecture Split
-
-GliaGrid has a unique advantage with its Electron-based frontend, which allows for powerful client-side capabilities typically unavailable in browser-only applications. Here's how to optimally balance responsibilities:
-
-### Recommended Architecture Division
-
-| Processing Stage | FastAPI Backend | Electron Frontend |
-|------------------|----------------|-------------------|
-| Initial file parsing | ✅ (Python's data science ecosystem) | ⚠️ (Only for quick previews) |
-| Heavy analysis algorithms | ✅ (Optimized with NumPy/pandas) | ❌ (Keep in Python) |
-| Data serving | ✅ (Optimized, compressed) | ❌ (Request from backend) |
-| File I/O after initial analysis | ❌ (Network bottleneck) | ✅ (Direct file access) |
-| Visualization processing | ❌ (Send minimal data) | ✅ (Transform locally) |
-| Selection & filtering | ❌ (Except complex queries) | ✅ (Fast on pre-loaded data) |
-| Caching & persistence | ⚠️ (Job results only) | ✅ (All processed data) |
-
-### 1. Direct File Access in Electron
-
-Once initial processing is complete, Electron can directly access the processed result files:
-
-```typescript
-// In main process (main.js)
-ipcMain.handle('read-processed-file', async (event, jobId, fileType) => {
-  // Construct path to processed files based on job ID
-  const filePath = path.join(app.getPath('userData'), 'processed', jobId, `${fileType}.parquet`);
-  
-  // Read directly using Node.js (e.g., with arrow-js for Parquet files)
-  const fileData = await parquet.readFile(filePath);
-  
-  // Return only what's needed based on current view
-  return optimizeForCurrentView(fileData);
-});
-```
-
-### 2. Hybrid Analysis Pipeline
-
-Optimize the analysis pipeline by splitting work:
-
-```
-┌───────────────┐   ┌───────────────┐   ┌───────────────────────┐
-│ 1. FastAPI    │   │ 2. FastAPI    │   │ 3. Electron (Node.js) │
-│ Initial Parse │──▶│ Core Analysis │──▶│ Post-processing &     │
-│ & Validation  │   │ Algorithms    │   │ Visualization Prep    │
-└───────────────┘   └───────────────┘   └───────────────────────┘
-```
-
-This approach:
-1. Uses Python's strengths for data science
-2. Minimizes data transfer over network
-3. Leverages client-side computing power
-
-### 3. Implementation Examples
-
-#### Backend API Optimization
+#### Enhanced API Endpoints
 
 ```python
-@router.get("/analysis/{job_id}/metadata")
-async def get_analysis_metadata(job_id: str):
-    """Return lightweight metadata about analysis results"""
-    # This includes file paths, summary statistics, and access info
-    # Electron can use this to directly access result files
-    return {
-        "files": {
-            "spatial": f"{job_id}/spatial_results.parquet",
-            "interactions": f"{job_id}/interaction_results.parquet"
-        },
-        "summary": {
-            "point_count": 9000000,
-            "layer_count": 5,
-            "interaction_count": 2500
-        },
-        "access_info": {
-            "base_path": f"/path/to/results/{job_id}/",
-            "checksum": "sha256:abc123..."  # For validating file integrity
-        }
-    }
+@router.get("/points/{job_id}")
+async def get_points(
+    job_id: str,
+    resolution: float = Query(1.0, description="Data resolution (0.1 to 1.0)"),
+    region: str = Query(None, description="JSON bounding box for spatial filtering"),
+    limit: int = Query(1000, description="Maximum points to return")
+):
+    """Get spatial points with resolution control and region filtering."""
+    # Implementation using the optimized data loading methods
 ```
 
-#### Electron Direct Data Access
+### Electron Integration
 
-```typescript
-// In renderer process (React app)
-export async function loadSpatialData(jobId: string, viewportBounds?: BoundingBox) {
-  // First check if we have cached this data already
-  const cachedData = await localCache.get(`spatial:${jobId}`);
-  if (cachedData) return filterForViewport(cachedData, viewportBounds);
-  
-  // Check if we're in Electron and can access files directly
-  if (window.electron) {
-    try {
-      // Get metadata first (small request)
-      const metadata = await api.getAnalysisMetadata(jobId);
-      
-      // Direct file access through Electron main process
-      const data = await window.electron.readProcessedFile(
-        jobId, 
-        'spatial', 
-        viewportBounds
-      );
-      
-      // Cache for future use
-      await localCache.set(`spatial:${jobId}`, data);
-      return data;
-    } catch (err) {
-      console.error('Direct file access failed, falling back to API', err);
-    }
-  }
-  
-  // Fallback to API if direct access fails or in web mode
-  return api.getSpatialData(jobId, viewportBounds);
-}
-```
+#### Direct File Access
 
-### 4. Performance-Critical Functions to Move to Electron
-
-1. **Point filtering & selection**: Move lasso selection processing to client
-   ```typescript
-   // Much faster in Electron than sending polygons to backend
-   function getPointsInPolygon(points, polygon) {
-     // Use point-in-polygon npm package
-     return points.filter(pt => pointInPolygon([pt.x, pt.y], polygon));
-   }
-   ```
-
-2. **Spatial data chunking**: Client-managed progressive loading
-   ```typescript
-   // Main process handles chunking based on current view
-   function loadVisibleTilesForViewport(viewport, resolution) {
-     const tiles = getTilesForViewport(viewport, resolution);
-     return Promise.all(tiles.map(tile => 
-       fs.promises.readFile(getTilePath(tile))
-     ));
-   }
-   ```
-
-3. **Visualization-specific transformations**: Transform once, reuse many times
-   ```typescript
-   // Process once, store results for different visualizations
-   function preprocessForAllVisualizations(points) {
-     return {
-       spatialOverview: prepareSpatialPoints(points),
-       layerBoundaries: extractLayerBoundaries(points),
-       densityMap: computeDensityGrid(points)
-     };
-   }
-   ```
-
-### 5. Strategic Caching
-
-Implement a two-level caching strategy:
-
-1. **Backend Cache**: Store long-term results
-   ```python
-   # In FastAPI service
-   class AnalysisService:
-       def __init__(self):
-           self.cache = Cache(ttl=3600*24*7)  # 1 week cache
-           
-       async def get_analysis_results(self, job_id):
-           cached = self.cache.get(job_id)
-           if cached:
-               return cached
-           # Otherwise compute and cache
-   ```
-
-2. **Electron Persistent Cache**: Store everything the user has seen
-   ```typescript
-   // In Electron app
-   class PersistentCache {
-     constructor() {
-       this.dbPath = path.join(app.getPath('userData'), 'cache.db');
-       this.db = new SQLite(this.dbPath);
-     }
-     
-     async store(key, data) {
-       await this.db.run(
-         'INSERT OR REPLACE INTO cache VALUES (?, ?, ?)',
-         [key, JSON.stringify(data), Date.now()]
-       );
-     }
-     
-     async retrieve(key) {
-       const row = await this.db.get(
-         'SELECT data FROM cache WHERE key = ?', 
-         [key]
-       );
-       return row ? JSON.parse(row.data) : null;
-     }
-   }
-   ```
-
-### 6. Background Processing with IPC
-
-Utilize Electron's background processes for heavy work:
-
-```typescript
+```javascript
 // In main.js
-app.whenReady().then(() => {
-  const workerPool = new WorkerPool(4); // 4 worker threads
+ipcMain.handle('read-backend-file', async (event, fileId, options = {}) => {
+  // Construct path to temporary uploads directory
+  const backendDir = path.join(app.getPath('userData'), '..', '.temp_uploads');
   
-  ipcMain.handle('process-data', async (event, jobId, operation, data) => {
-    // Offload to worker thread
-    return workerPool.submit({
-      operation,
-      data,
-      jobId
-    });
-  });
+  try {
+    // Find the file with this ID
+    const files = await fsPromises.readdir(backendDir);
+    const matchingFile = files.find(file => file.startsWith(fileId));
+    
+    if (!matchingFile) {
+      throw new Error(`File with ID ${fileId} not found`);
+    }
+    
+    const filePath = path.join(backendDir, matchingFile);
+    
+    // Handle different file types
+    const ext = path.extname(filePath).toLowerCase();
+    if (ext === '.csv') {
+      // Read and parse CSV with chunking
+      return readCsvChunked(filePath, options);
+    } else if (ext === '.h5ad') {
+      // For H5AD, we might need to use Python through child_process
+      throw new Error('H5AD direct reading not implemented yet');
+    }
+    
+    throw new Error(`Unsupported file type: ${ext}`);
+  } catch (error) {
+    console.error('Error reading backend file:', error);
+    throw error;
+  }
 });
 
-// In renderer (React)
-async function computeCustomSelection() {
-  const result = await window.electron.processData(
-    currentJobId,
-    'customSelectionAnalysis', 
-    {points: selectedPoints, parameters: analysisParams}
-  );
+// Helper function to read CSV in chunks
+async function readCsvChunked(filePath, options = {}) {
+  const { offset = 0, limit = 1000, sampleRate = 1.0 } = options;
   
-  setAnalysisResults(result);
-}
-```
-
-## Additional Frontend Optimizations
-
-Some critical frontend-specific optimizations from the previous performance plan that deserve implementation:
-
-### 1. WebGL Rendering Optimizations
-
-```typescript
-// In SpatialOverviewVisualization.tsx
-const layers = useMemo(() => {
-  return [
-    new ScatterplotLayer({
-      id: 'points-layer',
-      data: pointsData,
-      // Performance optimizations
-      getPosition: d => [d.x, d.y],
-      // Use instanced rendering for large point sets
-      _instanced: true,
-      // Adjust point rendering based on zoom
-      radiusScale: Math.max(1, 10 / Math.pow(2, zoom)),
-      // Only render points in current viewport
-      _filterData: ({startRow, endRow}) => {
-        // Filter visible
-        return filterVisible(pointsData, startRow, endRow, viewport);
-      },
-      // Binary data for faster GPU transfer
-      getColor: {
-        type: 'accessor',
-        value: new Uint8Array(colorData.buffer)  // Pre-allocated color array
-      }
-    })
-  ];
-}, [pointsData, zoom, viewport]);
-```
-
-### 2. Lazy Component Initialization
-
-```typescript
-// Only initialize heavy components when visible
-function LazyVisualization({ isVisible, ...props }) {
-  // Only create the component when visible
-  if (!isVisible) return <div className="placeholder">Select data to view</div>;
-  
-  return <InteractionVisualization {...props} />;
-}
-
-// Use with React's Suspense for even better loading behavior
-const LazyLoadedVisualization = React.lazy(() => 
-  import('./InteractionVisualization')
-);
-```
-
-### 3. Specialized Binary Formats 
-
-For maximum rendering performance with large datasets, consider specialized data formats:
-
-```typescript
-// Convert points to binary format for WebGL
-function pointsToBinary(points) {
-  // Create a single ArrayBuffer for all points
-  // 2 floats (x,y) + 1 uint32 (color) per point
-  const buffer = new ArrayBuffer(points.length * 12);
-  
-  // Create typed array views
-  const positions = new Float32Array(buffer, 0, points.length * 2);
-  const colors = new Uint32Array(buffer, points.length * 8, points.length);
-  
-  // Fill arrays
-  points.forEach((point, i) => {
-    positions[i*2] = point.x;
-    positions[i*2+1] = point.y;
-    colors[i] = encodeColor(point.layer); // Convert color to packed RGBA
-  });
-  
-  return {
-    buffer,
-    positions,
-    colors
-  };
-}
-```
-
-### 4. Component-Specific Optimizations
-
-#### SpatialOverviewVisualization
-
-```typescript
-// In SpatialOverviewVisualization.tsx
-
-// Use multi-resolution approach
-useEffect(() => {
-  // Start with low resolution
-  loadData(jobId, { resolution: 0.1 }).then(initialData => {
-    setPoints(initialData);
+  return new Promise((resolve, reject) => {
+    const results = [];
+    let rowCount = 0;
+    let skippedCount = 0;
     
-    // Then load higher resolution in background
-    loadData(jobId, { resolution: 0.5 }).then(mediumData => {
-      if (mounted.current) setPoints(mediumData);
-      
-      // Finally load full resolution if needed
-      if (zoom > 5) {
-        loadData(jobId, { resolution: 1.0 }).then(fullData => {
-          if (mounted.current) setPoints(fullData);
+    Papa.parse(fs.createReadStream(filePath), {
+      header: true,
+      skipEmptyLines: true,
+      step: (row) => {
+        rowCount++;
+        
+        // Apply sampling and offset/limit
+        if (rowCount <= offset) return;
+        if (limit && results.length >= limit) return;
+        
+        // Apply sampling
+        if (sampleRate < 1.0 && Math.random() > sampleRate) {
+          skippedCount++;
+          return;
+        }
+        
+        results.push(row.data);
+      },
+      complete: () => {
+        resolve({
+          data: results,
+          totalRows: rowCount,
+          sampledRows: results.length,
+          skippedRows: skippedCount
         });
-      }
+      },
+      error: (error) => reject(error)
     });
   });
-}, [jobId, zoom]);
-
-// Implement layer boundary caching
-const [layerBoundaries, setLayerBoundaries] = useState({});
-useEffect(() => {
-  if (points.length > 0 && !layerBoundaries[currentLayer]) {
-    // Compute convex hull for layer boundaries
-    const boundary = computeLayerBoundary(points, currentLayer);
-    setLayerBoundaries(prev => ({...prev, [currentLayer]: boundary}));
-  }
-}, [points, currentLayer]);
+}
 ```
 
-#### InteractionVisualization
+#### Preload Configuration
+
+```javascript
+// In preload.js
+contextBridge.exposeInMainWorld('electron', {
+  // Project management
+  saveProject: (projectName, projectData) => ipcRenderer.invoke('save-project', projectName, projectData),
+  listProjects: () => ipcRenderer.invoke('list-projects'),
+  loadProject: (filePath) => ipcRenderer.invoke('load-project', filePath),
+  deleteProject: (filePath) => ipcRenderer.invoke('delete-project', filePath),
+  
+  // Direct file access
+  readBackendFile: (fileId, options) => ipcRenderer.invoke('read-backend-file', fileId, options),
+  
+  // Background processing
+  processData: (jobId, operation, data) => ipcRenderer.invoke('process-data', jobId, operation, data)
+});
+```
+
+### Frontend Components
+
+#### SharedDataStore
 
 ```typescript
-// In InteractionVisualization.tsx
+// In frontend/src/services/data/SharedDataStore.ts
+export class SharedDataStore {
+  private static instance: SharedDataStore;
+  private cache: Map<string, any> = new Map();
+  private loadingPromises: Map<string, Promise<any>> = new Map();
+  private priorityQueue = new PriorityQueue<DataLoadRequest>();
+  private isProcessing = false;
+  
+  // Singleton pattern
+  static getInstance() {
+    if (!this.instance) {
+      this.instance = new SharedDataStore();
+    }
+    return this.instance;
+  }
+  
+  // Priority queue methods
+  enqueue(request: DataLoadRequest) {
+    this.priorityQueue.add(request);
+    if (!this.isProcessing) {
+      this.processQueue();
+    }
+  }
+  
+  async processQueue() {
+    this.isProcessing = true;
+    while (!this.priorityQueue.isEmpty()) {
+      const request = this.priorityQueue.pop();
+      await this.handleRequest(request);
+    }
+    this.isProcessing = false;
+  }
+  
+  // Data access methods
+  async getChunk(jobId: string, fileType: string, options: { 
+    offset?: number, 
+    limit?: number, 
+    resolution?: number,
+    priority?: 'high' | 'medium' | 'low'
+  } = {}) {
+    const { priority = 'medium', ...fetchOptions } = options;
+    const cacheKey = `${jobId}:${fileType}:${JSON.stringify(fetchOptions)}`;
+    
+    // Check cache first
+    if (this.cache.has(cacheKey)) {
+      return this.cache.get(cacheKey);
+    }
+    
+    // Check if already loading
+    if (this.loadingPromises.has(cacheKey)) {
+      return this.loadingPromises.get(cacheKey);
+    }
+    
+    // Add to priority queue
+    const request = { 
+      jobId, 
+      fileType, 
+      options: fetchOptions, 
+      priority, 
+      cacheKey 
+    };
+    
+    this.enqueue(request);
+    
+    // Create a promise that will resolve when the request is processed
+    let resolvePromise, rejectPromise;
+    const promise = new Promise((resolve, reject) => {
+      resolvePromise = resolve;
+      rejectPromise = reject;
+    });
+    
+    this.loadingPromises.set(cacheKey, promise);
+    request.resolve = resolvePromise;
+    request.reject = rejectPromise;
+    
+    return promise;
+  }
+  
+  // Data loading implementation
+  private async handleRequest(request: DataLoadRequest) {
+    const { jobId, fileType, options, cacheKey, resolve, reject } = request;
+    
+    try {
+      // Try direct file access if in Electron
+      let result;
+      if (window.electron?.readBackendFile) {
+        try {
+          // Get fileId from jobId mapping
+          const fileId = await this.getFileIdFromJobId(jobId, fileType);
+          if (fileId) {
+            result = await window.electron.readBackendFile(fileId, options);
+          }
+        } catch (err) {
+          console.warn('Direct file access failed, falling back to API', err);
+        }
+      }
+      
+      // Fallback to API if direct access failed or not available
+      if (!result) {
+        result = await api.getDataChunk(jobId, fileType, options);
+      }
+      
+      // Cache the result
+      this.cache.set(cacheKey, result);
+      resolve(result);
+      
+    } catch (error) {
+      reject(error);
+    } finally {
+      this.loadingPromises.delete(cacheKey);
+    }
+  }
+  
+  // Helper method to map job IDs to file IDs
+  private async getFileIdFromJobId(jobId: string, fileType: string) {
+    // This would need to be implemented based on your app's data structure
+    // Could request from an API endpoint or store mapping in local storage
+    // For now, returning a dummy implementation
+    return jobId + '_' + fileType;
+  }
+}
 
-// Use viewport-based filtering
-const visiblePoints = useMemo(() => {
-  return filterPointsInViewport(allPoints, viewport);
-}, [allPoints, viewport]);
-
-// Pre-compute density maps
-const densityMap = useMemo(() => {
-  if (!visiblePoints.length) return null;
-  // Generate grid-based density metrics
-  return generateDensityGrid(visiblePoints, 50); // 50x50 grid
-}, [visiblePoints]);
+// Priority queue implementation
+class PriorityQueue<T extends { priority: string }> {
+  private items: T[] = [];
+  
+  add(item: T) {
+    // Convert priority string to numeric value
+    const priorityValue = 
+      item.priority === 'high' ? 3 :
+      item.priority === 'medium' ? 2 : 1;
+    
+    // Add item with numeric priority
+    this.items.push({...item, numericPriority: priorityValue});
+    
+    // Sort by priority (higher values first)
+    this.items.sort((a, b) => b.numericPriority - a.numericPriority);
+  }
+  
+  pop(): T | undefined {
+    return this.items.shift();
+  }
+  
+  isEmpty(): boolean {
+    return this.items.length === 0;
+  }
+}
 ```
 
-## Conclusion
+#### SpatialOverviewVisualization Component
 
-By implementing these architectural changes, GliaGrid will be able to:
-
-1. **Handle Massive Datasets**: Process 9M+ row datasets efficiently through chunking, indexing, and multi-resolution sampling.
-
-2. **Accelerate Visualization**: Provide responsive visualizations through progressive loading and client-side caching.
-
-3. **Enable Custom Analysis**: Support efficient lasso selection and analysis through spatial indexing and optimized data flow.
-
-4. **Leverage Electron**: Utilize Electron's capabilities for client-side processing and direct file access.
-
-The most critical first step is optimizing the `/points/{jobId}/all` endpoint to efficiently handle large datasets, followed by implementing client-side caching of processed results to avoid redundant work. 
+```tsx
+// In SpatialOverviewVisualization.tsx
+function SpatialOverviewVisualization({ jobId }) {
+  const [points, setPoints] = useState([]);
+  const [resolution, setResolution] = useState(0.1); // Start with 10%
+  const [isLoading, setIsLoading] = useState(true);
+  const dataStore = useSharedDataStore();
+  
+  // Progressive loading based on zoom level
+  useEffect(() => {
+    async function loadData() {
+      setIsLoading(true);
+      try {
+        // Initial low-res sample
+        const initialData = await dataStore.getChunk(jobId, 'spatial', { 
+          resolution,
+          priority: 'high' 
+        });
+        setPoints(initialData);
+        
+        // If we're at a high zoom level, load more detailed data
+        if (resolution < 0.5) {
+          // After showing initial data, load more detailed view
+          const detailedData = await dataStore.getChunk(jobId, 'spatial', { 
+            resolution: 0.5,
+            priority: 'medium'
+          });
+          setPoints(detailedData);
+        }
+      } catch (err) {
+        console.error('Failed to load data:', err);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    
+    loadData();
+  }, [jobId, resolution]);
+  
+  // WebGL optimized layers
+  const layers = useMemo(() => {
+    return [
+      new ScatterplotLayer({
+        id: 'points-layer',
+        data: points,
+        // Performance optimizations
+        getPosition: d => [d.x, d.y],
+        // Use instanced rendering for large point sets
+        _instanced: true,
+        // Adjust point rendering based on zoom
+        radiusScale: Math.max(1, 10 / Math.pow(2, zoom)),
+        // Only render points in current viewport
+        _filterData: ({startRow, endRow}) => {
+          // Filter visible
+          return filterVisible(points, startRow, endRow, viewport);
+        },
+        // Binary data for faster GPU transfer
+        getColor: {
+          type: 'accessor',
+          value: new Uint8Array(colorData.buffer)  // Pre-allocated color array
+        }
+      })
+    ];
+  }, [points, zoom, viewport]);
+  
+  // Rest of component...
+}
+```
