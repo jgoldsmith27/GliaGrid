@@ -56,5 +56,6 @@ If you encounter issues with large files when cloning or pushing:
 1. Make sure you have the latest version with large files ignored in .gitignore
 2. If you still have issues, you can download the release version directly from the releases page. 
 
-### Notes
-- H5AD files not actually supported
+### ToDos
+- add downstream support for H5AD file handlers in rest of pipeline (they do not work currently)
+- add layer boundary anotations to regular visualizations
