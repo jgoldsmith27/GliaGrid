@@ -4,17 +4,23 @@ import pandas as pd
 import anndata as ad
 from fastapi import HTTPException, Depends
 import time # For simulating work
-from typing import Dict, Any
+from typing import Dict, Any, List
 import logging # Import logging
 import asyncio
 from scipy.spatial import ConvexHull # ADDED: Import ConvexHull
 import numpy as np # ADDED: Import numpy for array handling
+# Need geopandas and shapely for polygon filtering
+import geopandas as gpd
+from shapely.geometry import Point, Polygon
+from ..models.analysis_models import CustomAnalysisResponse, AnalysisResultItem, AnalysisMapping # Import response model and AnalysisMapping
+# Import core logic functions
+from ..analysis_logic import core
 
 # Import the new JobService and its dependency function
 from app.services.job_service import JobService, get_job_service
 from app.services.file_service import FileService
 # Import models from the models file
-from app.models.analysis_models import AnalysisPayload, AnalysisMapping, CustomAnalysisRequest, PointData
+from app.models.analysis_models import AnalysisPayload # REMOVED CustomAnalysisRequest, PointData
 
 # REMOVED OLD IMPORT: from ..api.analysis_routes import CustomAnalysisRequest, PointData 
 # Assume settings are available for standard file paths
@@ -266,131 +272,10 @@ class AnalysisService:
         finally:
             pass # Cleanup if needed
 
-    # --- NEW Method for Custom Selection Analysis --- 
-    async def run_custom_analysis_background(self, job_id: str, request: CustomAnalysisRequest):
-        """Background task for running analysis on custom-selected points.
-        
-        Args:
-            job_id: The ID of the analysis job.
-            request: The request data containing selected points and analysis parameters.
-        """
-        logger.info(f"Starting custom selection analysis for job: {job_id}")
-        
-        try:
-            # Update job status to running
-            await self.job_service.update_job_status(job_id, 
-                                              status="running", 
-                                              message="Processing custom selection...",
-                                              progress=0.1)
-            
-            # Create DataFrames from the request points
-            logger.info(f"Creating DataFrames from {len(request.ligands)} ligand and {len(request.receptors)} receptor points")
-            
-            # Convert PointData lists to DataFrames
-            ligand_df = pd.DataFrame([p.dict() for p in request.ligands])
-            receptor_df = pd.DataFrame([p.dict() for p in request.receptors])
-            
-            # Prepare "spatial" DataFrame by combining points with standard column names
-            spatial_data = []
-            
-            # Add ligand genes
-            for ligand_name in set(ligand_df['gene']):
-                # Filter points for this ligand
-                ligand_points = ligand_df[ligand_df['gene'] == ligand_name]
-                for _, point in ligand_points.iterrows():
-                    spatial_data.append({
-                        'gene': ligand_name, 
-                        'x': point['x'], 
-                        'y': point['y'],
-                        'layer': 'custom_selection' # All points in same "layer" for custom selection
-                    })
-            
-            # Add receptor genes
-            for receptor_name in set(receptor_df['gene']):
-                # Filter points for this receptor
-                receptor_points = receptor_df[receptor_df['gene'] == receptor_name]
-                for _, point in receptor_points.iterrows():
-                    spatial_data.append({
-                        'gene': receptor_name, 
-                        'x': point['x'], 
-                        'y': point['y'],
-                        'layer': 'custom_selection'
-                    })
-                    
-            # Create combined spatial DataFrame
-            spatial_df = pd.DataFrame(spatial_data)
-            
-            # If original job ID was provided, try to get interaction data from it
-            interactions_df = None
-            if request.original_job_id:
-                logger.info(f"Attempting to retrieve interactions data from original job: {request.original_job_id}")
-                try:
-                    original_job_context = self.job_service.get_job_context(request.original_job_id)
-                    if original_job_context:
-                        interactions_path = FileService.get_file_path(original_job_context['interactionsFileId'])
-                        interactions_mapping = AnalysisMapping(**original_job_context['interactionsMapping'])
-                        interactions_df = self._load_and_standardize(interactions_path, interactions_mapping, STANDARDIZED_INTERACTION_COLS)
-                        logger.info(f"Successfully loaded interactions data from original job")
-                    else:
-                        logger.warning(f"Could not find context for original job: {request.original_job_id}")
-                except Exception as e:
-                    logger.error(f"Error loading interactions data from original job: {e}")
-            
-            # If we couldn't get interactions from original job, create a minimal one
-            if interactions_df is None:
-                logger.info("Creating minimal interactions DataFrame from point selection")
-                # Create interaction pairs for all ligand-receptor combinations
-                interaction_data = []
-                for ligand_name in set(ligand_df['gene']):
-                    for receptor_name in set(receptor_df['gene']):
-                        interaction_data.append({
-                            'ligand': ligand_name,
-                            'receptor': receptor_name
-                        })
-                        
-                interactions_df = pd.DataFrame(interaction_data)
-                
-            # Update progress
-            await self.job_service.update_job_status(job_id, 
-                                                 progress=0.3, 
-                                                 message="Running analysis on selection...")
-                
-            # Run a simplified analysis pipeline on the custom data
-            # For now we'll just do pathway dominance
-            logger.info(f"Running pathway dominance on custom selection")
-            # Use a dummy value for 'custom_selection' in place of multiple tissue layers
-            results = {
-                'custom_selection': {} # Dict to store results for this selection
-            }
-            
-            # Actual analysis - depending on the points provided
-            try:
-                pathway_results = run_pathway_dominance_pipeline(spatial_df, interactions_df)
-                results['custom_selection']['pathway_dominance'] = pathway_results.get('custom_selection', [])
-                
-                # Optional: You could also run module_context if the data supports it
-                # But that likely needs module information
-                
-                # Update with completed results
-                await self.job_service.update_job_status(job_id,
-                                                    status="success",
-                                                    progress=1.0,
-                                                    message="Custom analysis complete",
-                                                    results=results)
-                                                    
-                logger.info(f"Custom analysis for job {job_id} completed successfully")
-                
-            except Exception as analysis_error:
-                logger.exception(f"Error in custom analysis calculations: {analysis_error}")
-                await self.job_service.update_job_status(job_id,
-                                                    status="failed",
-                                                    message=f"Analysis calculation error: {str(analysis_error)}")
-        
-        except Exception as e:
-            logger.exception(f"Error in custom selection analysis: {e}")
-            await self.job_service.update_job_status(job_id,
-                                                status="failed",
-                                                message=f"Analysis error: {str(e)}")
+    # --- REMOVED Method for Custom Selection Analysis --- 
+    # async def run_custom_analysis_background(self, job_id: str, request: CustomAnalysisRequest):
+    #    ...
+    #    ...
 
     # Helper method removed - we now directly call self.job_service.update_job_status
             
@@ -538,6 +423,178 @@ class AnalysisService:
     # --- MOVED the dependency function OUTSIDE the class --- 
     # def get_analysis_service_dependency(job_service: JobService = Depends(get_job_service)) -> "AnalysisService":
     #    # ...
+
+    async def run_custom_analysis(
+        self,
+        original_job_id: str,
+        polygon_coords: List[List[float]],
+        initial_context: Dict[str, Any]
+    ) -> CustomAnalysisResponse:
+        """Runs the analysis pipeline on a subset of spatial data defined by a polygon."""
+        
+        print(f"Starting custom analysis for job {original_job_id}")
+        
+        try:
+            # 1. Extract context (file IDs, mappings)
+            inputs = initial_context.get('inputs', {})
+            files = inputs.get('files', {})
+            mappings = inputs.get('mappings', {})
+
+            spatial_file_id = files.get('spatialFileId')
+            interactions_file_id = files.get('interactionsFileId')
+            modules_file_id = files.get('modulesFileId')
+
+            spatial_mapping = mappings.get('spatialMapping', {})
+            interactions_mapping = mappings.get('interactionsMapping', {})
+            modules_mapping = mappings.get('modulesMapping', {})
+
+            if not all([spatial_file_id, interactions_file_id, modules_file_id, 
+                        spatial_mapping, interactions_mapping, modules_mapping]):
+                raise ValueError("Missing required file IDs or mappings in the original job context.")
+
+            # Convert mapping dicts back to AnalysisMapping objects for _load_and_standardize
+            spatial_mapping_obj = AnalysisMapping(**spatial_mapping)
+            interactions_mapping_obj = AnalysisMapping(**interactions_mapping)
+            modules_mapping_obj = AnalysisMapping(**modules_mapping)
+
+            if not all([spatial_file_id, interactions_file_id, modules_file_id, 
+                        spatial_mapping_obj, interactions_mapping_obj, modules_mapping_obj]): # Check objects
+                raise ValueError("Missing required file IDs or mappings in the original job context.")
+
+            # 2. Load original data using _load_and_standardize
+            print("Loading original data files...")
+            spatial_path = FileService.get_file_path(spatial_file_id)
+            interactions_path = FileService.get_file_path(interactions_file_id)
+            modules_path = FileService.get_file_path(modules_file_id)
+            
+            spatial_df = self._load_and_standardize(spatial_path, spatial_mapping_obj, STANDARDIZED_SPATIAL_COLS)
+            interactions_df = self._load_and_standardize(interactions_path, interactions_mapping_obj, STANDARDIZED_INTERACTION_COLS)
+            modules_df = self._load_and_standardize(modules_path, modules_mapping_obj, STANDARDIZED_MODULE_COLS)
+            print(f"Spatial data loaded with {len(spatial_df)} points initially.")
+
+            # 3. Filter Spatial Data by Polygon
+            print("Filtering spatial data using lasso polygon...")
+            if len(polygon_coords) < 4:
+                 raise ValueError("Lasso polygon must have at least 4 vertices (including closing point).")
+            
+            # Convert DataFrame to GeoDataFrame
+            # Use standard column names directly now
+            geometry = [Point(xy) for xy in zip(spatial_df['x'], spatial_df['y'])]
+            spatial_gdf = gpd.GeoDataFrame(spatial_df, geometry=geometry)
+            # Create Shapely Polygon from coordinates
+            lasso_polygon = Polygon(polygon_coords)
+            
+            # Perform spatial query
+            points_within_lasso = spatial_gdf[spatial_gdf.within(lasso_polygon)]
+            
+            # Drop the temporary geometry column if needed, keeping the filtered DataFrame
+            filtered_spatial_df = pd.DataFrame(points_within_lasso.drop(columns='geometry'))
+            
+            print(f"Filtered spatial data contains {len(filtered_spatial_df)} points.")
+            if filtered_spatial_df.empty:
+                 print("Warning: No spatial points found within the lasso selection.")
+                 return CustomAnalysisResponse(pathway_dominance=[], module_context=[])
+
+            # 4. Run Analysis Pipeline on Filtered Data (Modified)
+            print("Running analysis pipeline on filtered data...")
+            
+            # Run Stage 2: Pathway Dominance directly on filtered data
+            # Assumes the core function handles iterating scopes internally and we extract the relevant part
+            pathway_results_dict = core.run_pathway_dominance_pipeline(
+                spatial_df=filtered_spatial_df, 
+                interactions_df=interactions_df
+            )
+            # Extract results for the scope relevant to the subset (likely 'whole_tissue' equivalent)
+            # Need to know the exact key returned by the core function for a single subset
+            # Assuming it returns results under a single key, e.g., 'custom_selection' or defaults to 'whole_tissue'
+            # Let's try to get the first value from the results dictionary as it should only contain one scope
+            pathway_results_list = next(iter(pathway_results_dict.values()), []) if pathway_results_dict else []
+            
+            # Run Stage 3: Module Context directly on filtered data
+            # Assumes it also handles scopes internally
+            module_context_results_dict = core.run_module_context_pipeline(
+                spatial_df=filtered_spatial_df, 
+                interactions_df=interactions_df,
+                modules_df=modules_df,
+                # Pass dummy pathway results if needed, or modify core logic
+                full_pathway_results={}
+            )
+            # Extract results similar to pathway dominance
+            module_context_list = next(iter(module_context_results_dict.values()), []) if module_context_results_dict else []
+
+            print("Analysis pipeline finished.")
+
+            # 5. Structure and Return Results (Modified)
+            # Convert lists of dicts to DataFrames for merging (if not empty)
+            pathway_df = pd.DataFrame(pathway_results_list)
+            module_df = pd.DataFrame(module_context_list)
+
+            if pathway_df.empty and module_df.empty:
+                final_results_list = []
+                print("Warning: Both pathway and module results are empty for the custom selection.")
+            elif pathway_df.empty:
+                final_results_list = module_df.to_dict(orient='records')
+            elif module_df.empty:
+                final_results_list = pathway_df.to_dict(orient='records')
+            else:
+                # Perform merge only if both have data and common columns
+                try:
+                    # Ensure merge columns exist
+                    if 'ligand' not in pathway_df.columns or 'receptor' not in pathway_df.columns or \
+                       'ligand' not in module_df.columns or 'receptor' not in module_df.columns:
+                           raise KeyError("Missing 'ligand' or 'receptor' column for merging.")
+                           
+                    merged_df = pd.merge(
+                        pathway_df, 
+                        module_df, 
+                        on=['ligand', 'receptor'], 
+                        how='outer' # Keep all rows from both, fill missing with NaN
+                    )
+                    # Convert NaN to None for JSON compatibility
+                    merged_df = merged_df.replace({np.nan: None})
+                    final_results_list = merged_df.to_dict(orient='records')
+                except KeyError as merge_error:
+                    print(f"Error merging pathway and module results: {merge_error}. Returning unmerged lists.")
+                    # Fallback: Pydantic validation will still happen based on the model
+                    return CustomAnalysisResponse(
+                         pathway_dominance=pathway_results_list,
+                         module_context=module_context_list
+                    )
+                except Exception as merge_exc:
+                    print(f"Unexpected error during result merge: {merge_exc}. Returning unmerged lists.")
+                    return CustomAnalysisResponse(
+                         pathway_dominance=pathway_results_list,
+                         module_context=module_context_list
+                    )
+            
+            # Create the response object - Pydantic will validate against AnalysisResultItem
+            response = CustomAnalysisResponse(
+                 pathway_dominance=final_results_list, # Pass the merged list for validation
+                 module_context=final_results_list # Pass the same merged list
+                 # OR adjust if the model requires separating them again after merge
+                 # pathway_dominance = pathway_df.replace({np.nan: None}).to_dict(orient='records') if not pathway_df.empty else [],
+                 # module_context = module_df.replace({np.nan: None}).to_dict(orient='records') if not module_df.empty else []
+            )
+
+            # Let's stick to returning separate lists as per the model definition
+            pathway_final = pathway_df.replace({np.nan: None}).to_dict(orient='records') if not pathway_df.empty else []
+            module_final = module_df.replace({np.nan: None}).to_dict(orient='records') if not module_df.empty else []
+            
+            # Ensure column names match AnalysisResultItem before creating response
+            # Example renaming (if needed):
+            # pathway_final = pathway_df.rename(columns={'score': 'pathway_score'})...to_dict()
+            
+            response = CustomAnalysisResponse(
+                 pathway_dominance=pathway_final,
+                 module_context=module_final
+            )
+            
+            print(f"Custom analysis completed successfully for job {original_job_id}.")
+            return response
+            
+        except Exception as e:
+            logger.exception(f"Error during custom analysis service for job {original_job_id}: {e}")
+            raise e 
 
 # --- Dependency function MOVED HERE (outside the class) ---
 def get_analysis_service_dependency(job_service: JobService = Depends(get_job_service)) -> "AnalysisService":

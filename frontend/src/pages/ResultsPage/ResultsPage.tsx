@@ -52,6 +52,10 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
   const [selectedPair, setSelectedPair] = useState<[string, string] | null>(null);
   const [combinedAnalysisData, setCombinedAnalysisData] = useState<CombinedInteractionData[]>([]);
   const [lassoCoords, setLassoCoords] = useState<[number, number][] | null>(null); // ADDED state for lasso coords
+  // ADDED: State for custom analysis results
+  const [customAnalysisResults, setCustomAnalysisResults] = useState<any | null>(null); // Define a more specific type later
+  const [isLoadingCustomAnalysis, setIsLoadingCustomAnalysis] = useState(false);
+  const [customAnalysisError, setCustomAnalysisError] = useState<string | null>(null);
 
   // --- State for Spatial Overview Data (managed here for persistence) ---
   // REMOVED - Now managed by SharedDataStore via useSpatialStreamData hook
@@ -159,25 +163,73 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
     setSelectedPair(pair);
   }, []);
 
-  // ADDED: Handler for lasso selection coordinates
   const handleLassoSelect = useCallback((coords: [number, number][] | null) => {
     console.log("[ResultsPage] Lasso selection coords:", coords);
     setLassoCoords(coords);
+    // Clear previous custom results when lasso selection changes/clears
+    setCustomAnalysisResults(null);
+    setCustomAnalysisError(null);
+    setIsLoadingCustomAnalysis(false);
     // TODO: Add logic here later to use the coords, e.g., trigger a custom analysis
-    // If setting coords, might want to ensure scope is 'custom'?
     // if (coords) { setSelectedScope('custom'); }
   }, []);
+
+  // ADDED: Handler to trigger custom analysis
+  const handleAnalyzeLasso = useCallback(async () => {
+      if (!jobId || !lassoCoords) {
+          console.error("Cannot analyze lasso without Job ID and coordinates.");
+          setCustomAnalysisError("Missing job ID or lasso selection.");
+          return;
+      }
+      console.log(`[ResultsPage] Triggering custom analysis for job ${jobId} with coords:`, lassoCoords);
+      setIsLoadingCustomAnalysis(true);
+      setCustomAnalysisError(null);
+      setCustomAnalysisResults(null);
+
+      try {
+          // TODO: Implement API call to backend
+          const apiUrl = `/api/analysis/custom/${jobId}`; // Example endpoint
+          const response = await fetch(apiUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ polygon: lassoCoords }),
+          });
+
+          if (!response.ok) {
+              const errorText = await response.text();
+              throw new Error(`Custom analysis failed: ${response.status} ${errorText || response.statusText}`);
+          }
+
+          const results = await response.json();
+          console.log("[ResultsPage] Received custom analysis results:", results);
+          setCustomAnalysisResults(results); // Store the results
+          // Maybe clear selectedPair for the new custom results view?
+          setSelectedPair(null);
+
+      } catch (error) {
+          console.error("[ResultsPage] Custom analysis error:", error);
+          setCustomAnalysisError(error instanceof Error ? error.message : String(error));
+          setCustomAnalysisResults(null);
+      } finally {
+          setIsLoadingCustomAnalysis(false);
+      }
+  }, [jobId, lassoCoords]); // Dependencies
   
   // --- Scope Change Handlers ---
   const handleScopeChange = useCallback((scope: ScopeType) => {
     console.log("[ResultsPage] Scope changed to:", scope);
     setSelectedScope(scope);
+    // Clear custom analysis state when changing scope
+    setLassoCoords(null);
+    setCustomAnalysisResults(null);
+    setCustomAnalysisError(null);
+    setIsLoadingCustomAnalysis(false);
+
     if (scope === 'whole_tissue') {
         setSelectedLayers([]);
-        // Optionally reset pair: setSelectedPair(null);
     } else if (scope === 'custom') {
         setSelectedLayers([]);
-        setSelectedPair(null); // Reset pair for custom view
+        setSelectedPair(null); 
     }
   }, []);
 
@@ -246,6 +298,7 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
                       : selectedScope; // Fallback to 'whole_tissue' or 'custom'
 
   // --- Render Main Layout --- 
+  console.log("[ResultsPage] Passing onAnalyzeSelection:", typeof handleAnalyzeLasso); // LOGGING
   return (
     <div className={styles.resultsPageLayout}> {/* New overall layout class */} 
       {/* Control Area */}
@@ -286,6 +339,8 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
                   {jobId && (
                       <SpatialOverviewVisualization 
                           jobId={jobId} // Pass jobId, component will get data via hook
+                          onLassoSelect={handleLassoSelect}
+                          onAnalyzeSelection={handleAnalyzeLasso}
                           // REMOVE props related to points/loading/error
                           // points={spatialPoints} 
                           // isLoading={isSpatialLoading} 
@@ -304,7 +359,11 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
                         onSelectPair={handleSelectPair}
                         apiScopeName={scopeForApi} 
                         currentScope={selectedScope} 
-                        onLassoSelect={handleLassoSelect} // ADDED prop pass-through
+                        onLassoSelect={handleLassoSelect}
+                        onAnalyzeSelection={handleAnalyzeLasso} // ADDED prop
+                        customAnalysisResults={customAnalysisResults} // ADDED prop
+                        isLoadingCustomAnalysis={isLoadingCustomAnalysis} // ADDED prop
+                        customAnalysisError={customAnalysisError} // ADDED prop
                     />
               </div>
           )}

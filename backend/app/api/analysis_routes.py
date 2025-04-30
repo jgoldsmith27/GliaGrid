@@ -12,7 +12,7 @@ from app.services.job_service import JobService, get_job_service
 # Only import the class, not the non-existent dependency function from the service file
 from app.services.analysis_service import AnalysisService
 # Import models from the correct location
-from app.models.analysis_models import AnalysisMapping, AnalysisPayload, PointData, CustomAnalysisRequest
+from app.models.analysis_models import AnalysisMapping, AnalysisPayload, CustomLassoAnalysisRequest, CustomAnalysisResponse
 
 # Assuming core analysis logic is importable
 # from ..analysis_logic.core import run_analysis_pipeline # Placeholder - core logic needs adaptation
@@ -152,54 +152,55 @@ async def start_analysis_endpoint(
 # --- NEW Models for Custom Analysis ---
 # REMOVED PointData and CustomAnalysisRequest CLASS DEFINITIONS FROM HERE
 
-# --- NEW Endpoint for Custom Analysis ---
-@router.post("/start/custom_selection", response_model=JobStatusResponse, status_code=202) 
-async def start_custom_selection_analysis(
-    # Reorder parameters: non-defaults first
-    background_tasks: BackgroundTasks,
-    request: CustomAnalysisRequest = Body(...),
-    job_service: JobService = Depends(get_job_service),
-    analysis_service: AnalysisService = Depends(get_analysis_service)
+# --- REMOVED Endpoint for Custom Selection Analysis (Background Task version) ---
+# @router.post("/start/custom_selection", ...)
+# async def start_custom_selection_analysis(...):
+#    ...
+
+@router.post("/custom/{job_id}", 
+             response_model=CustomAnalysisResponse, # Specify response model
+             summary="Run Analysis on Custom Lasso Selection",
+             description="Filters the original spatial data using the provided polygon and runs the analysis pipeline on the subset.")
+async def run_custom_analysis_endpoint(
+    job_id: str, 
+    request: CustomLassoAnalysisRequest, # Use the new request model
+    analysis_service: AnalysisService = Depends(get_analysis_service), # Inject service
+    job_service: JobService = Depends(get_job_service) # Inject job service for context?
 ):
-    """
-    Starts a background analysis task using a custom-defined set of points 
-    (e.g., from a user's lasso selection).
-    """
-    # Create a job ID using JobService (provides central tracking)
-    # Pass the request payload as initial context for reference if needed later
-    job_id = job_service.create_job(initial_context=request.dict())
-    logger.info(f"Received custom selection analysis request. Assigning Job ID: {job_id}")
-    
-    if not request.ligands or not request.receptors:
-        logger.error(f"Custom analysis request for job {job_id} missing ligand or receptor points.")
-        # Update job status to failed
-        asyncio.create_task(job_service.update_job_status(job_id, status='failed', message="Ligand and receptor point lists cannot be empty."))
-        raise HTTPException(status_code=400, detail="Ligand and receptor point lists cannot be empty.")
+    """Endpoint to run analysis on a user-defined spatial subset."""
+    try:
+        print(f"Received custom analysis request for job {job_id} with polygon vertex count: {len(request.polygon)}")
+        # We might need the original job context (file IDs, mappings) 
+        # Option 1: Fetch context using job_service
+        initial_context = await job_service.get_job_context(job_id)
+        if not initial_context:
+            raise HTTPException(status_code=404, detail=f"Original job context not found for job ID: {job_id}")
 
-    # --- Delegate to AnalysisService --- 
-    # Add a new method to AnalysisService to handle this specific workflow.
-    # This service method will be responsible for: 
-    #   - Creating DataFrames from the point lists.
-    #   - Handling column naming/validation.
-    #   - Loading necessary auxiliary data (interactions, modules - requires thought on how to locate these).
-    #   - Calling an adapted version of the core analysis logic.
-    #   - Updating job status via JobService.
-    
-    # *** TODO: Implement `run_custom_analysis_background` in `AnalysisService` ***
-    background_tasks.add_task(analysis_service.run_custom_analysis_background, job_id, request)
+        # Ensure we have necessary info (e.g., file IDs from context)
+        # This depends on what `run_custom_analysis` needs
+        # Example: 
+        # spatial_file_id = initial_context.get('inputs', {}).get('files', {}).get('spatialFileId')
+        # if not spatial_file_id:
+        #     raise HTTPException(status_code=400, detail="Spatial file ID missing from original job context.")
 
-    # Initial status update via JobService
-    initial_status_message = "Custom selection analysis job accepted."
-    asyncio.create_task(job_service.update_job_status(
-        job_id,
-        status="pending",
-        message=initial_status_message,
-        progress=0.0
-    ))
-    
-    # Return immediate response
-    return JobStatusResponse(
-        job_id=job_id,
-        status="pending",
-        message=initial_status_message
-    ) 
+        results = await analysis_service.run_custom_analysis(
+            original_job_id=job_id, 
+            polygon_coords=request.polygon,
+            initial_context=initial_context # Pass context if needed by service
+        )
+        
+        print(f"Custom analysis completed for job {job_id}.")
+        return results # Should match CustomAnalysisResponse structure
+
+    except FileNotFoundError as e:
+        print(f"Error during custom analysis for job {job_id}: {e}")
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        print(f"Value error during custom analysis for job {job_id}: {e}")
+        raise HTTPException(status_code=400, detail=str(e)) 
+    except Exception as e:
+        print(f"Unexpected error during custom analysis for job {job_id}: {e}")
+        # Log the full traceback for unexpected errors
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}") 

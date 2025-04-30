@@ -70,9 +70,17 @@ const getInitialViewState = (validBoundaries: Record<string, LayerBoundary>) => 
 interface SpatialOverviewVisualizationProps {
   jobId: string;
   onLassoSelect?: (selectedCoords: [number, number][] | null) => void; // MODIFIED: Expect coords or null
+  onAnalyzeSelection?: () => void; // ADDED: Callback to trigger analysis
 }
 
-const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> = ({ jobId, onLassoSelect }) => {
+const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> = ({ 
+  jobId, 
+  onLassoSelect, 
+  onAnalyzeSelection // Destructure the prop
+}) => {
+  // ADDED: Log received prop
+  console.log("[SpatialOverviewVisualization] Received onAnalyzeSelection:", typeof onAnalyzeSelection);
+
   // Use useJobStatus to get the final analysis results
   const { jobStatus, isLoading: isJobStatusLoading, error: jobStatusError } = useJobStatus(jobId);
 
@@ -196,20 +204,9 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
       isDragging.current = false;
       
       const finalPoints = [...lassoPoints, lassoPoints[0]]; // Close the polygon
-      // Keep lasso visual points until cleared
-      // setLassoPoints(finalPoints);
+      setLassoPoints(finalPoints); // MODIFIED: Save the final closed points to state
 
-      // Perform selection check
-      if (finalPoints.length >= 4) { // Need at least 3 points + closing point
-          // REMOVED: Layer intersection logic
-          /*
-          const lassoPolygon = turfPolygon([finalPoints]);
-          const newlySelectedLayers: string[] = [];
-          Object.entries(rawLayerBoundaries).forEach(([layerName, boundary]) => { ... });
-          setSelectedLayerNames(newlySelectedLayers);
-          console.log("[SpatialOverview] Lasso selected layers:", newlySelectedLayers);
-          */
-          
+      if (finalPoints.length >= 4) { 
           // MODIFIED: Call callback with lasso coordinates
           console.log("[SpatialOverview] Lasso completed with points:", finalPoints);
           if (onLassoSelect) {
@@ -221,9 +218,8 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
               onLassoSelect(null);
           }
       }
-      // Deactivate lasso mode automatically after drawing finishes
-      setIsDrawingLasso(false);
-  }, [isDrawingLasso, lassoPoints, onLassoSelect]); // REMOVED dependencies: rawLayerBoundaries, visibleLayers
+      setIsDrawingLasso(false); // Still deactivate drawing MODE
+  }, [isDrawingLasso, lassoPoints, onLassoSelect]); 
 
   // --- Lasso UI Controls --- 
   const toggleLasso = () => {
@@ -236,8 +232,6 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
   const clearLasso = () => {
       setIsDrawingLasso(false);
       setLassoPoints([]);
-      // REMOVED: No layer names to clear
-      // setSelectedLayerNames([]); 
       // MODIFIED: Call callback with null to clear selection
       if (onLassoSelect) {
         onLassoSelect(null);
@@ -278,29 +272,31 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
           })
           .filter(layer => layer !== null); // Filter out any null layers from map
           
-       // Add Lasso Layer if drawing
-       const lassoLayer = isDrawingLasso && lassoPoints.length >= 2 ?
+       // Add Lasso Layer
+       const lassoLayer = lassoPoints.length >= 2 ?
             new GeoJsonLayer({
                 id: 'lasso-layer',
-                // Data for GeoJsonLayer should be a Feature or FeatureCollection
-                data: lassoPoints.length >= 3 
-                    ? turfPolygon([[...lassoPoints, lassoPoints[0]]], { layerType: 'lasso' }) // Polygon feature
-                    : turfLineString(lassoPoints, { layerType: 'lasso' }), // LineString feature
+                // MODIFIED: Use LineString while dragging OR if < 4 points.
+                // Use Polygon only when drag is finished AND there are enough points.
+                data: isDragging.current || lassoPoints.length < 4
+                    ? turfLineString(lassoPoints, { layerType: 'lasso' })
+                    : turfPolygon([[...lassoPoints]], { layerType: 'lasso' }), // Only called when !isDragging and length >= 4
                 stroked: true,
-                filled: lassoPoints.length >= 3, // Only fill if it's a polygon
-                getLineColor: [255, 0, 0, 200], // Red line
-                getFillColor: [255, 0, 0, 50], // Transparent red fill
+                // MODIFIED: Fill only when it's a finished polygon
+                filled: !isDragging.current && lassoPoints.length >= 4,
+                getLineColor: [255, 0, 0, 200],
+                getFillColor: [255, 0, 0, 50],
                 getLineWidth: 2,
                 lineWidthMinPixels: 2,
-                pickable: false // Lasso itself shouldn't be pickable
+                pickable: false
             }) : null;
 
        const finalLayers = [
            ...boundaryLayers,
            lassoLayer
        ].filter(Boolean); // Filter out null lasso layer
-          
-       console.log(`[SpatialOverviewVisualization] Rendering ${boundaryLayers.length} boundary layers. Lasso active: ${isDrawingLasso}`);
+
+       console.log(`[SpatialOverviewVisualization] Rendering ${boundaryLayers.length} boundary layers. Lasso active: ${isDrawingLasso}, Dragging: ${isDragging.current}`); // Updated log
        // LOGGING added below
        if (lassoLayer) {
            console.log('[Layers Memo] Lasso Layer Data:', lassoLayer.props.data);
@@ -309,7 +305,7 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
        }
        return finalLayers as (PolygonLayer<any> | GeoJsonLayer<any>)[];
 
-  }, [rawLayerBoundaries, visibleLayers, layerColors, isDrawingLasso, lassoPoints]); // REMOVED dependency: selectedLayerNames
+  }, [rawLayerBoundaries, visibleLayers, layerColors, lassoPoints, isDrawingLasso]); // isDragging.current is intentionally omitted as it's a ref
 
   const toggleFullscreen = () => {
     setIsFullscreen(!isFullscreen);
@@ -417,29 +413,43 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
                 )}
               </div>
           </div>
-          {/* Lasso Controls - Remove selected layer display */}
-          <div className={`${styles.controlSection} ${styles.lassoControls}`}> 
+          {/* Lasso Controls */}
+          <div className={`${styles.controlSection} ${styles.lassoControls}`}>
                 <h4>Selection Tool</h4>
-                <button 
-                    onClick={toggleLasso} 
-                    disabled={!jobStatus?.results} 
-                    // Add activeLasso class when drawing
-                    className={isDrawingLasso ? styles.activeLasso : ''} 
-                > 
-                  {isDrawingLasso ? 'Cancel Lasso' : 'Start Lasso'}
-                </button>
-                {/* MODIFIED: Clear button is always shown when lasso is active or points exist */}
-                {(isDrawingLasso || lassoPoints.length > 0) && (
-                    <button onClick={clearLasso}> 
+
+                {/* Show Start Lasso ONLY if NOT drawing AND no points exist */}
+                {!isDrawingLasso && lassoPoints.length === 0 && (
+                  <button
+                      onClick={toggleLasso}
+                      disabled={!jobStatus?.results}
+                  >
+                    Start Lasso
+                  </button>
+                )}
+
+                {/* Show Cancel Lasso ONLY if drawing */}
+                {isDrawingLasso && (
+                  <button
+                      onClick={toggleLasso} // toggleLasso handles cancelling
+                      className={styles.activeLasso}
+                  >
+                    Cancel Lasso
+                  </button>
+                )}
+
+                {/* Show Clear Selection if ANY points exist */}
+                {lassoPoints.length > 0 && (
+                    <button onClick={clearLasso}>
                       Clear Selection
                     </button>
                 )}
-                {/* REMOVED: Display of selectedLayerNames 
-                {selectedLayerNames.length > 0 && (
-                    <div className={styles.selectionInfo}>
-                      Selected: {selectedLayerNames.join(', ')}
-                    </div>
-                )} */}
+
+                {/* Show Analyze Selection ONLY if NOT drawing AND a valid polygon exists */}
+                {!isDrawingLasso && lassoPoints.length >= 4 && (
+                    <button onClick={onAnalyzeSelection} title="Run analysis on the selected region">
+                        Analyze Selection
+                    </button>
+                )}
            </div>
       </div>
       {/* Fullscreen Toggle Button - Use standard button with unicode characters */}

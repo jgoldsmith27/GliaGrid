@@ -6,6 +6,7 @@ import SpatialOverviewVisualization from '../SpatialOverviewVisualization/Spatia
 import { CombinedInteractionData } from '../../pages/ResultsPage/ResultsPage'; // Import shared type
 import { ScopeType } from '../ScopeSelector/ScopeSelector'; // Import ScopeType if defined there
 import useInteractionData from '../../hooks/useInteractionData'; // Import the hook
+import { PathwayDominanceResult, ModuleContextResult } from '../../types/analysisResults'; // ADDED import
 
 // Type for the data returned by the new /api/points/{jobId}/all endpoint
 interface AllPointsData {
@@ -22,6 +23,10 @@ interface SummaryTabContentProps {
   currentScope: ScopeType; 
   apiScopeName: string | null; // ADDED: The actual scope name for the API call
   onLassoSelect?: (coords: [number, number][] | null) => void; // ADDED prop definition
+  onAnalyzeSelection?: () => void;
+  customAnalysisResults?: any | null;
+  isLoadingCustomAnalysis?: boolean;
+  customAnalysisError?: string | null;
 }
 
 // Define columns for the combined table
@@ -51,11 +56,18 @@ const SummaryTabContent: React.FC<SummaryTabContentProps> = ({
   currentScope, 
   apiScopeName, // ADDED
   onLassoSelect, // ADDED prop destructuring
+  onAnalyzeSelection,
+  customAnalysisResults,
+  isLoadingCustomAnalysis,
+  customAnalysisError,
 }) => {
+  // ADDED: Log received prop
+  console.log("[SummaryTabContent] Received onAnalyzeSelection:", typeof onAnalyzeSelection);
+
   // State for SpatialOverviewVisualization
-  const [allPointsData, setAllPointsData] = useState<AllPointsData[] | null>(null);
-  const [loadingAllPoints, setLoadingAllPoints] = useState(false);
-  const [allPointsError, setAllPointsError] = useState<string | null>(null);
+  // const [allPointsData, setAllPointsData] = useState<AllPointsData[] | null>(null);
+  // const [loadingAllPoints, setLoadingAllPoints] = useState(false);
+  // const [allPointsError, setAllPointsError] = useState<string | null>(null);
 
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null); // For highlighting table row
   
@@ -69,7 +81,7 @@ const SummaryTabContent: React.FC<SummaryTabContentProps> = ({
     warnings: interactionVizWarnings,
     // fetchInteractionData, // Not directly needed unless manual trigger is implemented
     cancelFetch: cancelInteractionVizFetch // Rename for clarity
-  } = useInteractionData(jobId, selectedPair, apiScopeName);
+  } = useInteractionData(jobId, selectedPair, currentScope !== 'custom' ? apiScopeName : null); // Only fetch if not custom scope initially
 
   // Fetch function for All Points data
   const fetchAllPoints = useCallback(async (currentJobId: string) => {
@@ -79,9 +91,9 @@ const SummaryTabContent: React.FC<SummaryTabContentProps> = ({
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
-    setLoadingAllPoints(true);
-    setAllPointsError(null);
-    setAllPointsData(null);
+    // setLoadingAllPoints(true);
+    // setAllPointsError(null);
+    // setAllPointsData(null);
 
     try {
         const url = `http://localhost:8000/api/points/${currentJobId}/all`;
@@ -96,20 +108,20 @@ const SummaryTabContent: React.FC<SummaryTabContentProps> = ({
             throw new Error(await response.text() || 'Failed to fetch all points data'); 
         }
         const data: AllPointsData[] = await response.json();
-        setAllPointsData(data);
+        // setAllPointsData(data);
     } catch (err) {
         if ((err as Error).name === 'AbortError') {
-             setAllPointsError('Request cancelled.');
+             // setAllPointsError('Request cancelled.');
         } else {
             const message = err instanceof Error ? err.message : 'An unknown error occurred';
-            setAllPointsError(message);
+            // setAllPointsError(message);
         }
-        setAllPointsData(null);
+        // setAllPointsData(null);
     } finally {
          if (abortControllerRef.current === controller) {
              abortControllerRef.current = null;
         }
-        setLoadingAllPoints(false);
+        // setLoadingAllPoints(false);
     }
   }, []); // Dependency: jobId implicitly via usage
 
@@ -118,9 +130,9 @@ const SummaryTabContent: React.FC<SummaryTabContentProps> = ({
     console.log(`[SummaryTabContent] useEffect triggered. Scope: ${currentScope}, Pair: ${selectedPair ? selectedPair.join('-') : 'null'}, apiScopeName: ${apiScopeName}`); 
     
     // Reset spatial overview state when dependencies change
-    setAllPointsData(null);
-    setAllPointsError(null);
-    setLoadingAllPoints(false);
+    // setAllPointsData(null);
+    // setAllPointsError(null);
+    // setLoadingAllPoints(false);
     // No need to reset interaction viz state, the hook manages it
     
     if (jobId) {
@@ -149,13 +161,11 @@ const SummaryTabContent: React.FC<SummaryTabContentProps> = ({
 
   // Table row click handler - only relevant for non-custom scopes
   const handleTableRowClick = useCallback((row: CombinedInteractionData, index: number) => {
-    console.log(`[SummaryTabContent] Row clicked: ${row.ligand}-${row.receptor}, Index: ${index}, Current scope: ${currentScope}`); // Log 1a
-      if (currentScope !== 'custom') { // Only update pair if not in custom mode
-         setSelectedRowIndex(index);
-         const newPair: [string, string] = [row.ligand, row.receptor];
-         console.log("[SummaryTabContent] Calling onSelectPair with:", newPair); // Log 1b
-         onSelectPair(newPair); 
-      }
+    // This handler applies to BOTH original and custom analysis tables
+    console.log(`[SummaryTabContent] Row clicked: ${row.ligand}-${row.receptor}, Index: ${index}, Scope: ${currentScope}`); 
+    setSelectedRowIndex(index);
+    const newPair: [string, string] = [row.ligand, row.receptor];
+    onSelectPair(newPair); // Call parent handler to manage selectedPair state
   }, [onSelectPair, currentScope]);
 
   // Generic cancel handler - now only cancels the spatial overview fetch
@@ -164,8 +174,8 @@ const SummaryTabContent: React.FC<SummaryTabContentProps> = ({
           console.log("[SummaryTabContent] Cancelling spatial overview fetch request.");
           abortControllerRef.current.abort();
           abortControllerRef.current = null; // Clear ref after abort
-          setLoadingAllPoints(false); // Ensure loading stops
-          setAllPointsError("Request cancelled by user."); // Set error state
+          // setLoadingAllPoints(false); // Ensure loading stops
+          // setAllPointsError("Request cancelled by user."); // Set error state
       } else {
           console.log("[SummaryTabContent] No active spatial overview fetch request to cancel.");
       }
@@ -173,99 +183,116 @@ const SummaryTabContent: React.FC<SummaryTabContentProps> = ({
       // but it needs a separate button or logic tied to the interaction viz state.
   }, []); // Removed dependency on abortControllerRef state, check directly
 
-  // Helper to render the correct visualization component
-  const renderVisualization = () => {
+  // Helper to render the correct component based on scope and custom results
+  const renderContent = () => {
     if (currentScope === 'custom') {
-        if (loadingAllPoints) {
+        if (isLoadingCustomAnalysis) {
             return (
                 <div className={styles.loadingContainer}>
-                  <p>Loading spatial overview...</p>
-                  {/* This button now ONLY cancels the spatial overview fetch */}
-                  <button onClick={handleCancelVizRequest} className={styles.cancelButton}>Cancel</button> 
+                  <p>Running custom analysis...</p>
+                  {/* TODO: Add cancel button for custom analysis API call? */}
                 </div>
             );
         }
-        if (allPointsError) {
-            return <p className={styles.errorText}>Error loading spatial overview: {allPointsError}</p>;
+        if (customAnalysisError) {
+            return <p className={styles.errorText}>Error during custom analysis: {customAnalysisError}</p>;
         }
-        if (allPointsData) {
-            return <SpatialOverviewVisualization jobId={jobId} onLassoSelect={onLassoSelect} />;
-        }
-        return <p>No spatial overview data available.</p>; // Or initial state message
+        if (customAnalysisResults) {
+            // Display results similar to non-custom scope
+            // We need to process customAnalysisResults into CombinedInteractionData format
+            // Assuming customAnalysisResults has { pathway_dominance: [], module_context: [] }
+            const pathwayData = customAnalysisResults.pathway_dominance || [];
+            const moduleData = customAnalysisResults.module_context || [];
+            const moduleContextMap = new Map<string, ModuleContextResult>();
+            moduleData.forEach((item: ModuleContextResult) => { moduleContextMap.set(`${item.ligand}-${item.receptor}`, item); });
+            const customCombinedData: CombinedInteractionData[] = pathwayData.map((pathwayItem: PathwayDominanceResult) => {
+                const moduleItem = moduleContextMap.get(`${pathwayItem.ligand}-${pathwayItem.receptor}`);
+                return { ...pathwayItem, ...moduleItem }; // Simple merge
+            });
 
-    } else { // 'whole_tissue' or 'layers'
-         // Use state from the hook
-        if (isLoadingInteractionViz) {
+            // Use the interaction hook for custom results visualization
+            // NOTE: This re-uses the hook; ensure dependencies are correct
+            const { interactionVizData: customVizData, isLoading: isLoadingCustomViz, error: customVizError } = 
+                useInteractionData(jobId, selectedPair, null); // MODIFIED: Pass null for apiScopeName for custom results
+
             return (
-                <div className={styles.loadingContainer}>
-                  <p>Loading interaction visualization...</p>
-                   {/* FIX: Uncomment and enable the cancel button for interaction viz */}
-                   <button onClick={cancelInteractionVizFetch} className={styles.cancelButton}>Cancel</button> 
+              <div className={styles.summaryLayout}> {/* Reuse existing layout */}
+                <div className={styles.tableArea}>
+                  <h3>Interaction Scores (Custom Selection)</h3> 
+                  <AnalysisTable
+                    data={customCombinedData}
+                    columns={combinedColumns}
+                    onRowClick={handleTableRowClick} 
+                    selectedRowIndex={selectedRowIndex} 
+                    loading={isLoadingCustomViz} // Use custom loading state?
+                  />
                 </div>
+                <div className={styles.visualizationArea}>
+                  <h3>Interaction Visualization ({selectedPair ? selectedPair.join('-') : 'Select Pair'})</h3>
+                  {isLoadingCustomViz && <p>Loading visualization...</p>}
+                  {customVizError && <p className={styles.errorText}>Viz Error: {customVizError}</p>}
+                  {!selectedPair && <p>Select a pair from the table.</p>}
+                  {customVizData && selectedPair && (
+                      <InteractionVisualization 
+                         data={customVizData}
+                         ligandName={selectedPair[0]}
+                         receptorName={selectedPair[1]}
+                         currentScope={'whole_tissue'}
+                     />
+                  )}
+                </div>
+              </div>
             );
-        }
-        if (interactionVizError) {
-            return <p className={styles.errorText}>Error loading interaction visualization: {interactionVizError}</p>;
-        }
-        if (!selectedPair) {
-             return <p>Select a Ligand-Receptor pair from the table to visualize interactions.</p>;
-        }
-        if (interactionVizData && selectedPair && apiScopeName && apiScopeName !== 'custom') {
+        } else {
+            // No custom results yet, show the spatial overview for selection
             return (
-                <> 
-                   {/* Display warnings above the visualization if they exist */}
-                   {interactionVizWarnings && interactionVizWarnings.length > 0 && (
-                       <div className={styles.warningsContainer}>
-                           <h4>Warnings:</h4>
-                           <ul>{interactionVizWarnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
-                       </div>
-                   )}
-                   <InteractionVisualization 
-                       data={interactionVizData}
-                       ligandName={selectedPair[0]}
-                       receptorName={selectedPair[1]}
-                       currentScope={currentScope}
+                <div className={styles.spatialOverviewOnlyArea}> {/* Optional: different style? */}
+                   <h3>Spatial Overview (Select Region)</h3>
+                   <SpatialOverviewVisualization 
+                      jobId={jobId} 
+                      onLassoSelect={onLassoSelect} 
+                      onAnalyzeSelection={onAnalyzeSelection} // Pass down the trigger
                    />
-                </>
+                </div>
             );
         }
-         // Handle the case where there's no data AFTER loading and without error (e.g., API returned empty)
-         if (!isLoadingInteractionViz && !interactionVizError && selectedPair) {
-             return <p>No interaction visualization data found for {selectedPair.join('-')} in scope '{apiScopeName}'.</p>;
-         }
-
-        return <p>Select a Ligand-Receptor pair to begin.</p>; // Default initial state
+    } else { // 'whole_tissue' or 'layers'
+        // Original logic using combinedData from props and interactionVizData from hook
+        return (
+          <div className={styles.summaryLayout}>
+            <div className={styles.tableArea}> 
+              <h3>Interaction Scores ({apiScopeName || currentScope})</h3> 
+              <AnalysisTable
+                data={combinedData}
+                columns={combinedColumns}
+                onRowClick={handleTableRowClick} 
+                selectedRowIndex={selectedRowIndex} 
+                loading={isLoadingInteractionViz}
+              />
+            </div>
+            <div className={styles.visualizationArea}>
+              <h3>Interaction Visualization ({selectedPair ? selectedPair.join('-') : 'Select Pair'})</h3>
+              {isLoadingInteractionViz && <p>Loading visualization...</p>}
+              {interactionVizError && <p className={styles.errorText}>Viz Error: {interactionVizError}</p>}
+              {!selectedPair && <p>Select a pair from the table.</p>}
+              {interactionVizWarnings && interactionVizWarnings.length > 0 && (
+                   <div className={styles.warningsContainer}><h4>Warnings:</h4><ul>{interactionVizWarnings.map((w, i) => <li key={i}>{w}</li>)}</ul></div>
+              )}
+              {interactionVizData && selectedPair && (
+                  <InteractionVisualization 
+                     data={interactionVizData}
+                     ligandName={selectedPair[0]}
+                     receptorName={selectedPair[1]}
+                     currentScope={currentScope}
+                 />
+              )}
+            </div>
+          </div>
+        );
     }
   };
 
-  return (
-    // Main container with flex layout
-    <div className={styles.summaryLayout}> 
-      {/* FIX: Conditionally render the table section only if scope is NOT custom */}
-      {currentScope !== 'custom' && ( 
-        <div className={styles.tableArea}> 
-          <h3>Interaction Scores ({apiScopeName || currentScope})</h3> 
-          <AnalysisTable
-            data={combinedData}
-            columns={combinedColumns}
-            onRowClick={handleTableRowClick} 
-            selectedRowIndex={selectedRowIndex} 
-            loading={isLoadingInteractionViz}
-          />
-        </div>
-      )} 
-
-      {/* Always render the visualization area, it will expand if table is hidden */}
-      <div className={styles.visualizationArea}> 
-        <h3>
-          {currentScope === 'custom' 
-              ? 'Spatial Overview (Select Region)' // Updated title for clarity
-              : `Interaction Visualization (${selectedPair ? selectedPair.join('-') : 'No Pair Selected'})`}
-        </h3>
-        {renderVisualization()}
-      </div>
-    </div>
-  );
+  return renderContent(); // Render based on the logic above
 };
 
 export default SummaryTabContent; 
