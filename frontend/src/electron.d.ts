@@ -31,7 +31,19 @@ declare global {
         loadProject: (filePath: string) => Promise<{ success: boolean; error?: string; projectState?: SavedProjectData }>; // Returns the full saved data structure
         deleteProject: (filePath: string, projectName: string) => Promise<{ success: boolean; error?: string; filePath?: string }>;
 
-        // Add other methods exposed from preload.js
+        // Direct file access methods
+        readBackendFile: (fileId: string, options: any) => Promise<any>;
+        getJobMetadata: (jobId: string) => Promise<any>;
+        
+        // Visualization data access
+        readVisualizationData: (jobId: string, options: any) => Promise<{ success: boolean; data?: any; error?: string }>;
+
+        // Event-driven job status API
+        subscribeJobStatus: (jobId: string) => Promise<{ success: boolean; error?: string }>;
+        unsubscribeJobStatus: (jobId: string) => Promise<{ success: boolean; error?: string }>;
+        checkJobStatus: (jobId: string) => Promise<{ success: boolean; status?: any; error?: string }>;
+        onJobStatusEvent: (callback: (data: any) => void) => (() => void); // Returns cleanup function
+        onJobStatusError: (callback: (data: any) => void) => (() => void); // Returns cleanup function
       };
     }
 }

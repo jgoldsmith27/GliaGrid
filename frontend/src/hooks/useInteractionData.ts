@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { SharedDataStore, useSharedData } from '../services/data/SharedDataStore';
 
 // Type for the data returned by the /api/visualization endpoint
 interface InteractionVisualizationData {
@@ -34,6 +35,9 @@ const useInteractionData = (
     const [error, setError] = useState<string | null>(null);
     const [warnings, setWarnings] = useState<string[]>([]);
     const abortControllerRef = useRef<AbortController | null>(null);
+    
+    // Get the shared data store instance
+    const dataStore = useSharedData();
 
     const cancelFetch = useCallback(() => {
         if (abortControllerRef.current) {
@@ -41,9 +45,6 @@ const useInteractionData = (
             abortControllerRef.current.abort();
             abortControllerRef.current = null;
             setIsLoading(false); // Ensure loading stops on manual cancel
-            // Optionally set an error or reset data? Depends on desired behavior
-            // setError('Request cancelled by user.'); 
-            // setInteractionVizData(null);
         }
     }, []);
 
@@ -77,42 +78,65 @@ const useInteractionData = (
 
         try {
             const [ligand, receptor] = selectedPair;
-            // Use apiScopeName directly as it's guaranteed to be 'whole_tissue' or a specific layer name here
-            const url = `http://localhost:8000/api/visualization/${jobId}?ligand=${encodeURIComponent(ligand)}&receptor=${encodeURIComponent(receptor)}&layer=${encodeURIComponent(apiScopeName)}`;
-            console.log("[useInteractionData] Fetching URL:", url);
+            
+            // Use the SharedDataStore to fetch data
+            const options = {
+                fileType: 'interactions',
+                ligand,
+                receptor,
+                layer: apiScopeName,
+                priority: 'high' as const
+            };
+            
+            // Create a URL for logging purposes only
+            const logUrl = `Using SharedDataStore for: ${jobId}?ligand=${encodeURIComponent(ligand)}&receptor=${encodeURIComponent(receptor)}&layer=${encodeURIComponent(apiScopeName)}`;
+            console.log("[useInteractionData] Fetching:", logUrl);
 
-            const response = await fetch(url, { signal: controller.signal });
-
-            if (controller.signal.aborted) {
-                console.log('[useInteractionData] Fetch aborted.');
-                 // Don't set state if aborted, the cleanup or next effect run will handle it
+            // Track abort controller state
+            const abortSignal = controller.signal;
+            if (abortSignal.aborted) {
+                console.log('[useInteractionData] Fetch aborted before starting.');
                 return;
             }
-             // Check if the controller associated with this specific request is still the current one
-             // Prevents race conditions if parameters change quickly
-            if (abortControllerRef.current !== controller) {
-                 console.log('[useInteractionData] Stale fetch response ignored.');
-                 return; 
+
+            // Use data store to get the data
+            try {
+                const data = await dataStore.getChunk(jobId, 'visualization', options);
+                
+                // Check if aborted during fetch
+                if (abortSignal.aborted) {
+                    console.log('[useInteractionData] Fetch aborted during execution.');
+                    return;
+                }
+                
+                // Check if this is still the current request
+                if (abortControllerRef.current !== controller) {
+                    console.log('[useInteractionData] Stale fetch response ignored.');
+                    return;
+                }
+                
+                console.log("[useInteractionData] Fetched data:", data);
+                
+                // Create the visualization data object from the returned data
+                const vizData: InteractionVisualizationData = {
+                    ligand: data.ligand || [],
+                    receptor: data.receptor || [],
+                    warnings: data.warnings || []
+                };
+                
+                setInteractionVizData(vizData);
+                setWarnings(vizData.warnings || []);
+            } catch (fetchErr) {
+                // Only handle error if this is still the current request
+                if (abortControllerRef.current === controller && !abortSignal.aborted) {
+                    throw fetchErr;
+                }
             }
-
-            if (!response.ok) {
-                const errMsg = await response.text();
-                console.error("[useInteractionData] Fetch Error:", errMsg);
-                throw new Error(errMsg || 'Failed to fetch interaction visualization data');
-            }
-
-            const data: InteractionVisualizationData = await response.json();
-            console.log("[useInteractionData] Fetched data:", data);
-            setInteractionVizData(data);
-            setWarnings(data.warnings || []);
-
         } catch (err) {
              // Check again if the error corresponds to the *current* controller
              if (abortControllerRef.current === controller || !controller.signal.aborted) {
                  console.error("[useInteractionData] Catch Error:", err);
                  if ((err as Error).name === 'AbortError') {
-                     // Don't set error state if the abort was intentional (e.g., by component unmount or param change)
-                     // setError('Request cancelled.'); // Or maybe not set error here?
                      console.log('[useInteractionData] Fetch aborted (caught).');
                  } else {
                      const message = err instanceof Error ? err.message : 'An unknown error occurred';
@@ -130,7 +154,7 @@ const useInteractionData = (
                  setIsLoading(false);
             }
         }
-    }, [jobId, selectedPair, apiScopeName, cancelFetch]); // Dependencies
+    }, [jobId, selectedPair, apiScopeName, cancelFetch, dataStore]); // Added dataStore as dependency
 
     // Effect to trigger fetch when dependencies change
     useEffect(() => {

@@ -1,3 +1,4 @@
+# ZeroMQ is used for direct IPC with Electron
 fastapi
 uvicorn[standard]
 python-dotenv
@@ -15,3 +16,4 @@ python-multipart
 pydantic>=2.0.0
 pydantic-settings
 scikit-learn
+pyzmq

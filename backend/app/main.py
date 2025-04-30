@@ -4,19 +4,22 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-# Import all necessary routers
-from .api import visualization # <<< RE-ENABLED IMPORT
-from .api import file_routes, analysis_routes # <<< Add spatial_data_routes
+# Import necessary routers
+from .api import file_routes, analysis_routes
 
-
-# --- DEBUG: Check if router object exists after import ---
-# print(f"DEBUG: visualization.router object: {visualization.router}") # <<< REMOVED
-# print(f"DEBUG: file_routes.router object: {file_routes.router}") # <<< REMOVED
-# print(f"DEBUG: analysis_routes.router object: {analysis_routes.router}") # <<< REMOVED
-# print(f"DEBUG: analysis_routes.ws_router object: {analysis_routes.ws_router}") # <<< REMOVED
-# ------------------------------------------------------
-
-app = FastAPI()
+app = FastAPI(
+    title="GliaGrid API",
+    description="""
+    GliaGrid backend API.
+    Note: Many data retrieval endpoints have been replaced with direct Electron file access.
+    This API now primarily handles:
+    1. Initial file uploads and processing
+    2. Analysis job creation and management 
+    3. REST-based status updates (polling)
+    4. Custom analysis computation
+    """,
+    version="2.0.0"
+)
 
 # Configure CORS
 app.add_middleware(
@@ -28,28 +31,24 @@ app.add_middleware(
 )
 
 # Include routers
-# Include file routes (adjust prefix if needed, assuming /api/files)
+# File routes for initial upload and management
 app.include_router(file_routes.router, prefix="/api/files", tags=["Files"]) 
-# Include analysis HTTP routes
-app.include_router(analysis_routes.router, prefix="/api", tags=["Analysis"]) # <<< ADDED PREFIX
-# Include analysis WebSocket router (no prefix needed as path is defined in the router)
-app.include_router(analysis_routes.ws_router, tags=["Analysis WebSocket"])
-# Include visualization routes (already present, but good to confirm)
-app.include_router(visualization.router, prefix="/api", tags=["Visualization"]) # <<< RE-ENABLED ROUTER
-# Remove spatial data router inclusion
-# app.include_router(spatial_data_routes.router, prefix="/api", tags=["Spatial Data"])
-# app.include_router(density_maps.router, prefix="/api", tags=["Spatial Visualization"])
-
-# --- REMOVE DEBUG: Print registered routes before starting --- 
-# for route in app.routes:
-#     if hasattr(route, "path"):
-#         print(f"Registered Route: Path={route.path}, Name={route.name}, Methods={getattr(route, 'methods', 'N/A')}")
-#     elif hasattr(route, "path_format"):
-#         # Handle WebSocket routes
-#         print(f"Registered WS Route: Path={route.path_format}")
-# print("--- Finished listing routes ---", flush=True)
-# ------------------------------------------------------
+# Analysis job creation and custom analysis computation
+app.include_router(analysis_routes.router, prefix="/api", tags=["Analysis"])
 
 @app.get("/")
 async def root():
-    return {"message": "GliaGrid Explorer API"} 
+    return {
+        "message": "GliaGrid Explorer API",
+        "architecture": "Hybrid architecture with direct Electron file access for data retrieval",
+        "version": "2.0.0"
+    } 
+
+# Import job service instance
+from .services.job_service import job_service_instance
+
+@app.on_event("shutdown")
+def cleanup_zmq():
+    """Clean up ZeroMQ resources on application shutdown"""
+    if hasattr(job_service_instance, 'cleanup_zmq'):
+        job_service_instance.cleanup_zmq() 

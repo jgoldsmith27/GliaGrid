@@ -170,7 +170,6 @@ def _calculate_pathway_dominance_for_scope(spatial_df_subset: pd.DataFrame, inte
     for _, interaction in possible_interactions.iterrows():
         ligand = interaction['ligand']
         receptor_complex = str(interaction['receptor']) 
-        pathway = interaction.get('pathway_name', 'Unknown')
         
         # Ligand must be in normalized expression dict (was present and relevant)
         if ligand not in gene_normalized_expression:
@@ -196,7 +195,6 @@ def _calculate_pathway_dominance_for_scope(spatial_df_subset: pd.DataFrame, inte
         scored_pairs.append({
             'ligand': ligand,
             'receptor': receptor_complex,
-            'pathway': pathway,
             'ligand_norm_expr': ligand_normalized,
             'receptor_avg_norm_expr': avg_receptor_normalized,
             'score': normalized_score
@@ -281,39 +279,20 @@ def _calculate_module_context_for_scope(modules_df: pd.DataFrame, pathway_result
         receptors = _split_receptor_complex(receptor_complex)
         ligand_module = module_lookup.get(ligand)
         
+        # Collect receptor modules more simply, without counting components
         receptor_modules = []
-        num_receptor_components_in_modules = 0
         for r in receptors:
             r_module = module_lookup.get(r)
             if r_module is not None:
                 receptor_modules.append(r_module)
-                num_receptor_components_in_modules += 1
-
-        # Determine interaction type based on module presence
-        interaction_type = 'Unknown'
-        is_same_module = None 
-        if ligand_module is not None and receptor_modules: # Both ligand and receptor(s) have modules
-            # All found receptor components must match the ligand module
-            is_same_module = all(m == ligand_module for m in receptor_modules)
-            interaction_type = 'Intra-module' if is_same_module else 'Inter-module'
-        elif ligand_module is not None: # Only ligand module known
-             interaction_type = 'Ligand Module Known'
-        elif receptor_modules: # Only receptor module(s) known
-             interaction_type = 'Receptor Module Known'
-             # Can check if all receptor components are in the *same* module, even if ligand unknown
-             if len(set(receptor_modules)) == 1:
-                  is_same_module = True # All receptor components are in the same module
-             else:
-                  is_same_module = False # Receptor components span different modules
-        # else: Both unknown, remains 'Unknown'
 
         context = pair.copy() # Start with original pair data (like score)
         context.update({
             'ligand_module': ligand_module, 
             'receptor_modules': receptor_modules if receptor_modules else None, # Use None if empty
-            'num_receptor_components_in_modules': num_receptor_components_in_modules,
-            'is_same_module': is_same_module, # Can be True, False, or None
-            'interaction_type': interaction_type
+            # Removed 'num_receptor_components_in_modules' field
+            # Removed 'is_same_module' field
+            # Removed 'interaction_type' field
         })
         module_context_results.append(context)
 

@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Body, BackgroundTasks, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Body, BackgroundTasks
 from pydantic import BaseModel, Field
-from typing import Dict, Optional, List, Set
+from typing import Dict, Optional, List
 import asyncio
 import uuid
 import json
@@ -32,11 +32,6 @@ router = APIRouter(
     responses={404: {"description": "Not found"}},
 )
 
-# Separate router for WebSocket endpoint without prefix interference
-ws_router = APIRouter(
-    tags=["Analysis WebSocket"]
-)
-
 # Pydantic model for the response (can be expanded later)
 class AnalysisResponse(BaseModel):
     status: str = Field(..., description="Status of the analysis initiation")
@@ -51,85 +46,25 @@ class JobStatusResponse(BaseModel):
     progress: Optional[float] = Field(None, description="Optional progress percentage (0.0 to 1.0)")
     results: Optional[Dict] = Field(None, description="Analysis results if status is 'success'")
 
-# --- WebSocket Connection Management ---
-class ConnectionManager:
-    def __init__(self):
-        # Dictionary mapping job_id to a set of active WebSocket connections
-        self.active_connections: Dict[str, Set[WebSocket]] = {}
+# Remove the WebSocket Connection Management section and replace with REST endpoint
+@router.get("/status/{job_id}", response_model=JobStatusResponse)
+async def get_job_status(job_id: str, job_service: JobService = Depends(get_job_service)):
+    """
+    Get the current status of a job.
+    Used for polling instead of WebSockets.
+    """
+    status = job_service.get_job_status(job_id)
+    if not status:
+        raise HTTPException(status_code=404, detail=f"Job ID {job_id} not found")
+    
+    # Add job_id for consistency
+    return {**status, "job_id": job_id}
 
-    async def connect(self, websocket: WebSocket, job_id: str):
-        await websocket.accept()
-        if job_id not in self.active_connections:
-            self.active_connections[job_id] = set()
-        self.active_connections[job_id].add(websocket)
-        print(f"WebSocket connected for job {job_id}. Total connections for job: {len(self.active_connections[job_id])}")
-
-    def disconnect(self, websocket: WebSocket, job_id: str):
-        if job_id in self.active_connections:
-            self.active_connections[job_id].remove(websocket)
-            print(f"WebSocket disconnected for job {job_id}. Remaining connections: {len(self.active_connections[job_id])}")
-            # Clean up job_id entry if no more connections
-            if not self.active_connections[job_id]:
-                del self.active_connections[job_id]
-
-    async def send_update(self, job_id: str, message: dict):
-        """Sends an update message to all clients connected for a specific job_id."""
-        if job_id in self.active_connections:
-            message_str = None
-            try:
-                # Attempt to serialize the message to JSON
-                message_str = json.dumps(message) 
-            except TypeError as e:
-                # If serialization fails (e.g., non-serializable objects in results)
-                logger.error(f"[Job {job_id}] Failed to serialize message for WebSocket: {e}")
-                # Attempt to send a simplified error message instead
-                try:
-                    error_payload = {
-                        "status": message.get("status", "error"), # Preserve status if possible
-                        "message": f"Internal error: Could not serialize results for job {job_id}",
-                        "progress": message.get("progress"), # Preserve progress if possible
-                        "job_id": job_id,
-                        "results": None # Explicitly nullify results
-                    }
-                    message_str = json.dumps(error_payload)
-                    logger.info(f"[Job {job_id}] Sending simplified error status via WebSocket.")
-                except Exception as inner_e:
-                    # If even the simplified message fails (unlikely)
-                    logger.error(f"[Job {job_id}] Failed to serialize even the simplified error message: {inner_e}")
-                    # Cannot send update if basic serialization fails
-                    return 
-            except Exception as e:
-                # Catch other potential errors during serialization
-                logger.error(f"[Job {job_id}] Unexpected error during WebSocket message serialization: {e}")
-                return # Don't proceed if serialization failed
-
-            # Proceed only if serialization was successful (message_str is not None)
-            if message_str:
-                # Create a task for each send operation to run them concurrently
-                tasks = [conn.send_text(message_str) for conn in self.active_connections[job_id]]
-                try:
-                    await asyncio.gather(*tasks)
-                    # logger.debug(f"Sent update to {len(tasks)} connections for job {job_id}") # Keep debug logging optional
-                except Exception as send_e:
-                    # Log errors during the actual sending process
-                    logger.error(f"[Job {job_id}] Error sending WebSocket message to one or more clients: {send_e}")
-
-manager = ConnectionManager()
-# Pass the manager instance to the AnalysisService or make it accessible
-# Option 1: Make it globally accessible (simpler for now)
-# This instantiation needs to happen where FastAPI can manage dependencies properly,
-# typically not directly at the module level like this if services depend on each other.
-# We will rely on FastAPI's dependency injection instead.
-# analysis_service_instance = AnalysisService(connection_manager=manager)
-# -------------------------------------
-
-# Dependency to get AnalysisService instance
-# Note: AnalysisService now depends on JobService, FastAPI handles this chain.
-def get_analysis_service(manager_instance: ConnectionManager = Depends(lambda: manager), # Inject manager
-                         job_service: JobService = Depends(get_job_service)) -> AnalysisService:
+# Dependency to get AnalysisService instance (without WebSocket dependency)
+def get_analysis_service(job_service: JobService = Depends(get_job_service)) -> AnalysisService:
     # This function allows FastAPI to correctly instantiate AnalysisService
-    # with its dependencies (manager and job_service)
-    return AnalysisService(connection_manager=manager_instance, job_service=job_service)
+    # with its dependencies
+    return AnalysisService(job_service=job_service)
 
 @router.post("/start", response_model=AnalysisResponse)
 async def start_analysis_endpoint(
@@ -172,71 +107,6 @@ async def start_analysis_endpoint(
     
     # Return immediately with the job ID
     return AnalysisResponse(status="success", message="Analysis job started in background.", job_id=job_id)
-
-@router.get("/status/{job_id}", response_model=JobStatusResponse)
-async def get_analysis_status(
-    job_id: str, 
-    job_service: JobService = Depends(get_job_service)
-):
-    """
-    Endpoint to check the status and potentially retrieve results of an analysis job.
-    Uses JobService to retrieve status.
-    """
-    logger.info(f"Checking status for job ID: {job_id}")
-    status_info = job_service.get_job_status(job_id)
-
-    if not status_info:
-        logger.warning(f"Job ID {job_id} not found for status check.")
-        raise HTTPException(status_code=404, detail=f"Job ID {job_id} not found.")
-
-    logger.info(f"Status found for job ID {job_id}: {status_info}")
-    # Ensure all potential fields from the status_info dict are included
-    return JobStatusResponse(
-        job_id=job_id,
-        status=status_info.get("status", "unknown"),
-        message=status_info.get("message"),
-        progress=status_info.get("progress"),
-        results=status_info.get("results")
-    )
-
-@ws_router.websocket("/ws/analysis/status/{job_id}")
-async def websocket_status_endpoint(
-    websocket: WebSocket, 
-    job_id: str,
-    # Inject JobService directly into the WebSocket endpoint
-    job_service: JobService = Depends(get_job_service) 
-):
-    """
-    WebSocket endpoint for real-time analysis status updates.
-    Uses JobService to check initial status.
-    """
-    await manager.connect(websocket, job_id)
-    try:
-        # Send the current status immediately upon connection using JobService
-        current_status = job_service.get_job_status(job_id)
-        if current_status:
-            # Add job_id for consistency, although it's in the URL
-            await manager.send_update(job_id, {**current_status, "job_id": job_id}) 
-        else:
-            # If job_id doesn't exist when WS connects
-            logger.warning(f"WebSocket connection attempt for non-existent job ID: {job_id}")
-            await manager.send_update(job_id, {"status": "error", "message": f"Job ID {job_id} not found.", "job_id": job_id})
-            # Consider closing the connection if job doesn't exist after sending error
-            # await websocket.close(code=1008) # Policy Violation or similar
-            # return # Exit the handler
-
-        # Keep the connection alive
-        while True:
-             # Keep connection open to push server updates
-             # Wait for disconnect instead of client messages
-             await websocket.receive_text() # Needed to detect disconnect properly
-
-    except WebSocketDisconnect:
-        manager.disconnect(websocket, job_id)
-        logger.info(f"Client disconnected from job {job_id}")
-    except Exception as e:
-        manager.disconnect(websocket, job_id)
-        logger.exception(f"Error in WebSocket connection for job {job_id}: {e}") 
 
 # --- NEW Models for Custom Analysis ---
 # REMOVED PointData and CustomAnalysisRequest CLASS DEFINITIONS FROM HERE

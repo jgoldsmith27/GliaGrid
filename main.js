@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs'); // Added for file system access
 const fsPromises = require('fs').promises;
 const Papa = require('papaparse'); // Added for CSV parsing
+const zmq = require('zeromq'); // Restored for ZeroMQ IPC
 
 // --- Project File Directory Setup ---
 const projectsDir = path.join(app.getPath('userData'), 'projects');
@@ -10,6 +11,72 @@ if (!fs.existsSync(projectsDir)) {
   fs.mkdirSync(projectsDir, { recursive: true });
 }
 const projectFileExtension = '.gliaproj';
+
+// --- Backend Integration Setup ---
+// Path to the backend's temporary uploads directory
+const backendTempDir = path.join(__dirname, 'backend', '.temp_uploads');
+
+// Setup ZeroMQ subscriber for direct IPC
+const ZMQ_IPC_ADDRESS = "ipc:///tmp/gliagrid-job-status";
+let zmqSocket = null;
+
+// Add to main.js - Event-driven job status tracking
+const activeJobSubscriptions = new Map(); // Track which jobs have active subscriptions
+
+// Function to set up ZeroMQ subscriber
+async function setupZmqSubscriber() {
+  try {
+    console.log(`[main.js] Setting up ZeroMQ subscriber...`);
+    zmqSocket = new zmq.Subscriber();
+    
+    // Subscribe to all job status updates
+    zmqSocket.subscribe('job.');
+    
+    await zmqSocket.connect(ZMQ_IPC_ADDRESS);
+    console.log(`[main.js] ZeroMQ subscriber connected to ${ZMQ_IPC_ADDRESS}`);
+    
+    // Set up message processing
+    (async () => {
+      console.log(`[main.js] Starting ZeroMQ message listener`);
+      for await (const [topic, message] of zmqSocket) {
+        try {
+          const topicStr = topic.toString();
+          const jobId = topicStr.substring(4); // Remove 'job.' prefix
+          const statusData = JSON.parse(message.toString());
+          
+          console.log(`[main.js] Received ZeroMQ message for job ${jobId}: ${statusData.status}`);
+          
+          // Only process if we have active subscribers for this job
+          if (activeJobSubscriptions.has(jobId)) {
+            const subscribers = activeJobSubscriptions.get(jobId);
+            
+            // Send update to all subscribers
+            for (const subscriber of subscribers) {
+              if (!subscriber.isDestroyed()) {
+                subscriber.send('job-status-event', { jobId, ...statusData });
+              } else {
+                subscribers.delete(subscriber);
+              }
+            }
+            
+            // If job is complete or failed, remove from active subscriptions
+            if (statusData.status === 'success' || statusData.status === 'failed' || statusData.status === 'error') {
+              console.log(`[main.js] Job ${jobId} completed with status: ${statusData.status}. Removing from subscription list.`);
+              activeJobSubscriptions.delete(jobId);
+            }
+          }
+        } catch (err) {
+          console.error(`[main.js] Error processing ZeroMQ message: ${err}`);
+        }
+      }
+    })().catch(err => console.error(`[main.js] ZeroMQ listener error: ${err}`));
+    
+    return true;
+  } catch (err) {
+    console.error(`[main.js] Failed to setup ZeroMQ subscriber: ${err}`);
+    return false;
+  }
+}
 
 async function createWindow() {
   // Dynamically import isDev
@@ -39,11 +106,6 @@ async function createWindow() {
     win.webContents.openDevTools({ mode: 'detach' });
   }
 }
-
-// This method will be called when Electron has finished
-// initialization and is ready to create browser windows.
-// Some APIs can only be used after this event occurs.
-app.whenReady().then(createWindow);
 
 // Quit when all windows are closed, except on macOS. There, it's common
 // for applications and their menu bar to stay active until the user quits
@@ -111,161 +173,227 @@ ipcMain.handle('list-projects', async () => {
           // Use saved name/date if available, otherwise fallback
           const name = projectData?.projectName || path.basename(file, projectFileExtension);
           const savedAt = projectData?.savedAt || (await fsPromises.stat(filePath)).mtime.toISOString();
-          projectFilesData.push({ filePath, name, savedAt });
-        } catch (parseError) {
-          console.warn(`Failed to read or parse project file ${file}:`, parseError);
-          // Add with fallback data if needed
-          try {
-              const stat = await fsPromises.stat(filePath);
-              projectFilesData.push({ filePath, name: path.basename(file, projectFileExtension), savedAt: stat.mtime.toISOString()});
-          } catch (statError) {
-               console.error(`Failed to stat file ${file} after parse error:`, statError);
-          }
+          
+          projectFilesData.push({
+            name,
+            savedAt,
+            filePath
+          });
+        } catch (error) {
+          console.error(`[main.js] Error reading project file ${filePath}:`, error);
+          // Still include file but with error info
+          projectFilesData.push({
+            name: path.basename(file, projectFileExtension),
+            savedAt: (await fsPromises.stat(filePath)).mtime.toISOString(),
+            filePath,
+            error: `Could not parse project file: ${error.message}`
+          });
         }
       }
     }
-    // Sort by save date, newest first
-    projectFilesData.sort((a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime());
+    
+    // Sort by newest first
+    projectFilesData.sort((a, b) => new Date(b.savedAt) - new Date(a.savedAt));
+    
     return { success: true, projects: projectFilesData };
   } catch (error) {
-    if (error.code === 'ENOENT') { /* ... handle not found ... */ return { success: true, projects: [] }; }
-    console.error('Failed to list projects:', error);
-    return { success: false, error: `Failed to list projects: ${error.message}`, projects: [] };
+    console.error('[main.js] Error listing projects:', error);
+    return { success: false, error: error.message, projects: [] };
   }
 });
 
-// Handle loading project state from a specific file path (reads the structure saved by save-project)
+// Handle loading a specific project file
 ipcMain.handle('load-project', async (event, filePath) => {
-  if (!filePath || !filePath.startsWith(projectsDir)) { /* ... invalid path ... */ }
   try {
-    const fileContent = await fsPromises.readFile(filePath, 'utf-8');
-    const projectState = JSON.parse(fileContent); // Should include projectName, savedAt, version, files, mappings
-    // Basic validation
-    if (!projectState || typeof projectState !== 'object' || !projectState.version || !projectState.files || !projectState.mappings) {
-        throw new Error('Invalid project file format.');
-    }
-    console.log('Loaded project from:', filePath);
-    return { success: true, projectState }; // Return the full saved object
-  } catch (error) { /* ... error handling ... */ }
-});
-
-// Handle deleting a specific project file by path
-ipcMain.handle('delete-project', async (event, filePath, projectName) => {
-   // Basic validation: Ensure the path is within the expected directory
-   if (!filePath || !filePath.startsWith(projectsDir)) {
-       return { success: false, error: 'Invalid project file path provided.' };
-   }
-
-   // Use projectName in the message, fallback if not provided
-   const displayProjectName = projectName || path.basename(filePath, projectFileExtension);
-
-  // Confirmation dialog
-  const { response } = await dialog.showMessageBox({
-    type: 'warning',
-    buttons: ['Cancel', 'Delete'], // Index 0: Cancel, Index 1: Delete
-    defaultId: 0, 
-    title: 'Confirm Delete',
-    message: `Are you sure you want to delete project '${displayProjectName}'?`, // Use the name
-    detail: `File: ${path.basename(filePath)}\nThis action cannot be undone.`, // Show filename in detail
-  });
-
-  if (response === 0) { // User clicked Cancel (Index 0)
-    console.log('Delete cancelled for:', filePath);
-    return { success: false, error: 'Delete cancelled by user.' }; 
-  }
-
-  // --- User clicked Delete --- 
-  let projectFileDeleted = false;
-  let backendFilesDeleted = true; // Assume success initially
-  let backendError = null;
-
-  try {
-    // 1. Read the project file to get file IDs *before* deleting it
-    let fileIdsToDelete = [];
-    try {
-      const fileContent = await fsPromises.readFile(filePath, 'utf-8');
-      const projectState = JSON.parse(fileContent);
-      // Extract non-null/undefined file IDs from the 'files' object
-      if (projectState && projectState.files) {
-        fileIdsToDelete = Object.values(projectState.files).filter(id => id != null);
-      }
-      // <<< Log extracted file IDs >>>
-      console.log(`[main.js] Extracted file IDs from ${path.basename(filePath)} for deletion:`, fileIdsToDelete);
-    } catch (readError) {
-      console.error(`Error reading project file ${filePath} before deletion:`, readError);
-      // Decide if you want to proceed with deleting the project file anyway
-      // Or return an error here? Let's proceed for now, but log the warning.
-      backendError = `Could not read project file to find associated data files: ${readError.message}`;
-    }
-
-    // 2. Attempt to delete associated files on the backend
-    if (fileIdsToDelete.length > 0) {
-        console.log(`Attempting to delete ${fileIdsToDelete.length} associated backend files...`);
-        const backendUrlBase = 'http://localhost:8000'; // Make sure this is correct
-        
-        const deletePromises = fileIdsToDelete.map(fileId => 
-            fetch(`${backendUrlBase}/api/files/${fileId}`, { method: 'DELETE' })
-        );
-        const results = await Promise.allSettled(deletePromises);
-        
-        // Use a for...of loop to allow awaiting inside
-        let index = 0;
-        for (const result of results) {
-            const fileId = fileIdsToDelete[index];
-            if (result.status === 'fulfilled') {
-                // <<< Log backend response status >>>
-                console.log(`[main.js] Backend DELETE response for fileId ${fileId}: Status ${result.value.status}`);
-                if (result.value.ok || result.value.status === 204) { 
-                    console.log(`Successfully deleted backend file for ID: ${fileId}`);
-                } else if (result.value.status === 404) {
-                     console.warn(`Backend file for ID ${fileId} not found (already deleted?).`);
-                } else {
-                    // Other backend error - Await the error text
-                    backendFilesDeleted = false;
-                    let errorDetail = 'Unknown backend error';
-                    try {
-                         // Try to get error detail from response body
-                         errorDetail = await result.value.text(); 
-                         // <<< Log backend error detail >>>
-                         console.log(`[main.js] Backend DELETE error detail for fileId ${fileId}:`, errorDetail);
-                    } catch (textError) {
-                         console.error(`Could not get error text for failed delete of ${fileId}:`, textError);
-                         errorDetail = `${result.value.status} ${result.value.statusText}`;
-                    }
-                    console.error(`[main.js] Failed backend DELETE for fileId ${fileId}: Status ${result.value.status}`);
-                    backendError = backendError ? `${backendError}; ${errorDetail}` : `Backend delete failed for ${fileId}: ${errorDetail}`;
-                }
-            } else {
-                // Fetch itself failed (network error, etc.)
-                backendFilesDeleted = false;
-                console.error(`[main.js] Network/fetch error deleting backend file for ID ${fileId}:`, result.reason);
-                 backendError = backendError ? `${backendError}; Fetch error for ${fileId}` : `Fetch error for ${fileId}`;
-            }
-            index++; // Increment index for the next fileId
-        }
-    }
-
-    // 3. Delete the project file itself
-    await fsPromises.unlink(filePath);
-    projectFileDeleted = true;
-    console.log('[main.js] Deleted project configuration file:', filePath);
-
-    // 4. Return overall status
-    if (projectFileDeleted && backendFilesDeleted) {
-        return { success: true, filePath };
-    } else {
-        // Construct a meaningful error message
-        let finalError = 'Project deleted, but failed to delete some associated data files.';
-        if (!projectFileDeleted) finalError = 'Failed to delete project configuration file.';
-        if (backendError) finalError += ` Backend errors: ${backendError}`;
-        return { success: false, error: finalError };
-    }
-
+    const content = await fsPromises.readFile(filePath, 'utf-8');
+    const projectData = JSON.parse(content);
+    return { success: true, projectState: projectData };
   } catch (error) {
-    // Handle errors during the main try block (e.g., project file unlink error)
-    console.error(`Failed to delete project file ${filePath}:`, error);
-    if (error.code === 'ENOENT') { /* ... */ }
-    return { success: false, error: `Failed to delete project file: ${error.message}` };
+    console.error(`[main.js] Failed to load project from ${filePath}:`, error);
+    return { success: false, error: `Failed to load project: ${error.message}` };
   }
 });
 
+// Handle deleting a specific project file
+ipcMain.handle('delete-project', async (event, filePath, projectName) => {
+  try {
+    await fsPromises.unlink(filePath);
+    console.log(`[main.js] Deleted project file: ${filePath}`);
+    return { success: true };
+  } catch (error) {
+    console.error(`[main.js] Failed to delete project ${filePath}:`, error);
+    return { success: false, error: `Failed to delete project: ${error.message}` };
+  }
+});
+
+// --- Direct File Access (Direct IPC) ---
+ipcMain.handle('read-backend-file', async (event, fileId, options = {}) => {
+  // Construct path to temporary uploads directory
+  const backendDir = path.join(__dirname, 'backend', '.temp_uploads');
+  
+  try {
+    // Find the file with this ID
+    const files = await fsPromises.readdir(backendDir);
+    const matchingFile = files.find(file => file.startsWith(fileId));
+    
+    if (!matchingFile) {
+      throw new Error(`File with ID ${fileId} not found`);
+    }
+    
+    const filePath = path.join(backendDir, matchingFile);
+    
+    // Handle different file types
+    const ext = path.extname(filePath).toLowerCase();
+    if (ext === '.csv') {
+      // Read and parse CSV with chunking
+      return readCsvChunked(filePath, options);
+    } else if (ext === '.h5ad') {
+      // For H5AD, we might need to use Python through child_process
+      throw new Error('H5AD direct reading not implemented yet');
+    }
+    
+    throw new Error(`Unsupported file type: ${ext}`);
+  } catch (error) {
+    console.error('Error reading backend file:', error);
+    throw error;
+  }
+});
+
+// Helper function to read CSV in chunks
+async function readCsvChunked(filePath, options = {}) {
+  const { offset = 0, limit = 1000, sampleRate = 1.0 } = options;
+  
+  return new Promise((resolve, reject) => {
+    const results = [];
+    let rowCount = 0;
+    let skippedCount = 0;
+    
+    Papa.parse(fs.createReadStream(filePath), {
+      header: true,
+      skipEmptyLines: true,
+      step: (row) => {
+        rowCount++;
+        
+        // Apply sampling and offset/limit
+        if (rowCount <= offset) return;
+        if (limit && results.length >= limit) return;
+        
+        // Apply sampling
+        if (sampleRate < 1.0 && Math.random() > sampleRate) {
+          skippedCount++;
+          return;
+        }
+        
+        results.push(row.data);
+      },
+      complete: () => {
+        resolve({
+          data: results,
+          totalRows: rowCount,
+          sampledRows: results.length,
+          skippedRows: skippedCount
+        });
+      },
+      error: (error) => reject(error)
+    });
+  });
+}
+
+// --- Direct Job Status IPC ---
+
+// Add handlers for job status management
+ipcMain.handle('subscribe-job-status', async (event, jobId) => {
+  const sender = event.sender;
+  
+  if (!activeJobSubscriptions.has(jobId)) {
+    activeJobSubscriptions.set(jobId, new Set());
+  }
+  
+  activeJobSubscriptions.get(jobId).add(sender);
+  console.log(`[main.js] Subscribed to job status for ${jobId}`);
+  
+  // Ensure ZMQ subscriber is setup
+  if (!zmqSocket) {
+    await setupZmqSubscriber();
+  }
+  
+  // Immediately fetch current status and send it
+  try {
+    const initialStatus = await fetchJobStatus(jobId);
+    sender.send('job-status-event', { jobId, ...initialStatus });
+  } catch (error) {
+    console.error(`[main.js] Error fetching initial job status: ${error}`);
+    sender.send('job-status-error', { jobId, error: error.message });
+  }
+  
+  // Return success
+  return { success: true };
+});
+
+ipcMain.handle('unsubscribe-job-status', (event, jobId) => {
+  const sender = event.sender;
+  
+  if (activeJobSubscriptions.has(jobId)) {
+    activeJobSubscriptions.get(jobId).delete(sender);
+    
+    // Clean up if no more subscribers
+    if (activeJobSubscriptions.get(jobId).size === 0) {
+      activeJobSubscriptions.delete(jobId);
+    }
+    
+    console.log(`[main.js] Unsubscribed from job status for ${jobId}`);
+  }
+  
+  return { success: true };
+});
+
+// Direct job status check using backend API
+ipcMain.handle('check-job-status', async (event, jobId) => {
+  try {
+    const status = await fetchJobStatus(jobId);
+    return { success: true, status };
+  } catch (error) {
+    console.error(`[main.js] Error checking job status for ${jobId}:`, error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Helper function to fetch job status from API
+async function fetchJobStatus(jobId) {
+  const response = await fetch(`http://localhost:8000/api/analysis/status/${jobId}`);
+  
+  if (!response.ok) {
+    throw new Error(`Failed to fetch job status: ${response.statusText}`);
+  }
+  
+  return await response.json();
+}
+
+// Get visualization data directly from backend
+ipcMain.handle('read-visualization-data', async (event, jobId, options = {}) => {
+  try {
+    // Build query parameters
+    const queryParams = new URLSearchParams();
+    if (options.resolution) queryParams.append('resolution', options.resolution);
+    if (options.region) queryParams.append('region', JSON.stringify(options.region));
+    if (options.limit) queryParams.append('limit', options.limit);
+    
+    const queryString = queryParams.toString() ? `?${queryParams.toString()}` : '';
+    const response = await fetch(`http://localhost:8000/api/visualization/${jobId}/points${queryString}`);
+    
+    if (!response.ok) {
+      throw new Error(`API returned status ${response.status}`);
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error(`[main.js] Error fetching visualization data for ${jobId}:`, error);
+    throw error;
+  }
+});
+
+// Start ZMQ subscriber when app is ready
+app.whenReady().then(async () => {
+  await setupZmqSubscriber();
+  createWindow();
+});

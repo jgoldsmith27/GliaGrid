@@ -30,10 +30,16 @@ const combinedColumns: ColumnDefinition<CombinedInteractionData>[] = [
     { key: 'score', header: 'Score (Pathway)', format: (v) => typeof v === 'number' ? v.toExponential(3) : 'N/A' },
     { key: 'ligand_norm_expr', header: 'Ligand Norm Expr', format: (v) => typeof v === 'number' ? v.toFixed(4) : 'N/A' },
     { key: 'receptor_avg_norm_expr', header: 'Receptor Norm Expr', format: (v) => typeof v === 'number' ? v.toFixed(4) : 'N/A' },
-    { key: 'interaction_type', header: 'Interaction Type' },
-    { key: 'ligand_module', header: 'Ligand Module' },
+    { 
+        key: 'ligand_module', 
+        header: 'Ligand Module',
+        format: (v) => {
+            if (v === null || v === undefined) return 'N/A';
+            // Convert to string, removing trailing zeros for numbers
+            return typeof v === 'number' ? v.toString() : String(v);
+        }
+    },
     { key: 'receptor_modules', header: 'Receptor Modules' }, // Array is handled by default formatter
-    { key: 'is_same_module', header: 'Same Module?' }, // Boolean is handled by default formatter
 ];
 
 const SummaryTabContent: React.FC<SummaryTabContentProps> = ({

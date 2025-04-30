@@ -6,8 +6,8 @@ import SummaryTabContent from '../../components/ResultsPage/SummaryTabContent'; 
 import ScopeSelector, { ScopeType } from '../../components/ScopeSelector/ScopeSelector'; // Import ScopeSelector and its exported type
 import LayerSelector from '../../components/LayerSelector/LayerSelector'; // Assuming this exists
 import { PathwayDominanceResult, ModuleContextResult } from '../../types/analysisResults'; // Import types
-// Import the new custom hook
-import useJobStatusWebSocket from '../../hooks/useJobStatusWebSocket';
+// Import the new event-driven hook
+import useJobStatus from '../../hooks/useJobStatus';
 
 // Define the structure for combined data
 export interface CombinedInteractionData {
@@ -29,8 +29,8 @@ export interface CombinedInteractionData {
 const ResultsPage: React.FC = () => { // Define as standard functional component
   const { jobId } = useParams<{ jobId: string }>(); // Get jobId from URL
   
-  // Call the custom hook to manage WebSocket connection and state
-  const { jobStatus, isConnected, isLoading, error } = useJobStatusWebSocket(jobId);
+  // Use the event-driven hook to manage job status
+  const { jobStatus, isLoading, error, refreshStatus } = useJobStatus(jobId);
   
   // --- UI/Data State ---
   // const [currentTab, setCurrentTab] = useState<ResultsTab>('Summary'); // Removed
@@ -150,19 +150,19 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
 
   // --- UI Rendering --- 
 
-  // Display connection status or initial loading message
-  if (!isConnected && isLoading && !error) {
-     return (
+  // Display initial loading message
+  if (isLoading && !jobStatus) {
+    return (
       <div className={styles.container}>
-        <LoadingSpinner message="Connecting to Analysis Stream..." />
+        <LoadingSpinner message="Loading Analysis Results..." />
       </div>
     );
   }
   
-  if (isLoading && (!jobStatus || jobStatus.status === 'processing')) {
+  if (isLoading && jobStatus && jobStatus.status === 'running') {
     return (
       <div className={styles.container}>
-        <LoadingSpinner message={jobStatus?.message || "Loading Analysis Results..."} />
+        <LoadingSpinner message={jobStatus?.message || "Processing Analysis..."} />
         {jobStatus && jobStatus.progress !== null && jobStatus.progress !== undefined && (
           <progress value={jobStatus.progress} max="1"></progress>
         )}
@@ -170,11 +170,11 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
     );
   }
 
-  // Always show loading until we have valid results
-  if (!jobStatus || (jobStatus.status !== 'success' && !isLoading)) {
+  // Show waiting message if we're still waiting for results
+  if (!jobStatus || (jobStatus.status === 'pending' && !isLoading)) {
     return (
       <div className={styles.container}>
-        <LoadingSpinner message="Waiting for analysis results..." />
+        <LoadingSpinner message="Waiting for analysis to start..." />
       </div>
     );
   }

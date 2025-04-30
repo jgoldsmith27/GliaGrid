@@ -1,9 +1,26 @@
 import uuid
+import os
+import json
+import zmq
+from pathlib import Path
 from typing import Dict, Any, Optional
+
+# Setup ZeroMQ publisher for IPC
+ZMQ_IPC_ADDRESS = "ipc:///tmp/gliagrid-job-status"
+context = zmq.Context()
+publisher = context.socket(zmq.PUB)
+
+try:
+    publisher.bind(ZMQ_IPC_ADDRESS)
+    print(f"ZeroMQ publisher bound to {ZMQ_IPC_ADDRESS}")
+except zmq.error.ZMQError as e:
+    print(f"Failed to bind ZeroMQ publisher: {e}")
+    publisher = None
 
 class JobService:
     """
     Manages the lifecycle and data (status, context, results) for background jobs.
+    Uses in-memory storage for job status and context.
     """
     def __init__(self):
         # In-memory storage for job status and context.
@@ -36,7 +53,7 @@ class JobService:
         """Checks if a job ID exists in the status tracker."""
         return job_id in self._jobs_status
 
-    def update_job_status(
+    async def update_job_status(
         self,
         job_id: str,
         status: Optional[str] = None,
@@ -46,7 +63,8 @@ class JobService:
     ):
         """
         Updates the status, progress, message, and results for a given job.
-
+        Also publishes the status update via ZeroMQ for direct IPC with Electron.
+        
         Args:
             job_id: The ID of the job to update.
             status: The new status string (e.g., 'running', 'completed', 'failed').
@@ -56,9 +74,9 @@ class JobService:
         """
         if not self.job_exists(job_id):
             print(f"JobService: Attempted to update non-existent job {job_id}")
-            # Optionally raise an error or handle gracefully
             return
 
+        # Update in-memory job status
         if status is not None:
             self._jobs_status[job_id]["status"] = status
         if progress is not None:
@@ -67,10 +85,23 @@ class JobService:
         if message is not None:
             self._jobs_status[job_id]["message"] = message
         if results is not None:
-            self._jobs_status[job_id]["results"] = results # Store results directly in status dict
+            self._jobs_status[job_id]["results"] = results
 
         print(f"JobService: Updated status for job {job_id}: {self._jobs_status[job_id]}")
-
+        
+        # Publish job status via ZeroMQ (true event-driven approach)
+        if publisher is not None:
+            try:
+                # Topic is the job ID, message is the serialized status
+                topic = f"job.{job_id}"
+                message_data = json.dumps({
+                    "job_id": job_id,
+                    **self._jobs_status[job_id]
+                })
+                publisher.send_multipart([topic.encode(), message_data.encode()])
+                print(f"JobService: Published status update for job {job_id} via ZeroMQ")
+            except Exception as e:
+                print(f"JobService: Error publishing to ZeroMQ: {e}")
 
     def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -115,6 +146,26 @@ class JobService:
             print(f"JobService: Attempted to get context for non-existent job {job_id}")
             return None
         return self._job_contexts.get(job_id)
+        
+    def cleanup_zmq(self):
+        """
+        Cleans up ZeroMQ resources.
+        Call this before application shutdown.
+        """
+        global publisher, context
+        if publisher:
+            try:
+                publisher.close()
+                print("JobService: Closed ZeroMQ publisher socket")
+            except Exception as e:
+                print(f"JobService: Error closing ZeroMQ publisher: {e}")
+        
+        if context:
+            try:
+                context.term()
+                print("JobService: Terminated ZeroMQ context")
+            except Exception as e:
+                print(f"JobService: Error terminating ZeroMQ context: {e}")
 
 # Singleton instance (or manage via FastAPI dependency injection)
 # For simplicity here, we use a global instance. FastAPI DI is preferred.
