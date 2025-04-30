@@ -5,7 +5,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 # Import necessary routers
-from .api import file_routes, analysis_routes
+from .api import file_routes, analysis_routes # Removed visualization import
 
 app = FastAPI(
     title="GliaGrid API",
@@ -35,6 +35,8 @@ app.add_middleware(
 app.include_router(file_routes.router, prefix="/api/files", tags=["Files"]) 
 # Analysis job creation and custom analysis computation
 app.include_router(analysis_routes.router, prefix="/api", tags=["Analysis"])
+# Visualization routes for retrieving visualization data - REMOVED
+# app.include_router(visualization.router, prefix="/api/visualization", tags=["Visualization"])
 
 @app.get("/")
 async def root():

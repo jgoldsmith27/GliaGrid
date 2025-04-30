@@ -101,7 +101,7 @@ const useInteractionData = (
 
             // Use data store to get the data
             try {
-                const data = await dataStore.getChunk(jobId, 'visualization', options);
+                const data = await dataStore.getChunk(jobId, 'interactions', options);
                 
                 // Check if aborted during fetch
                 if (abortSignal.aborted) {

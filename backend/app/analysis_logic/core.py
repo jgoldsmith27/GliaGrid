@@ -107,6 +107,7 @@ def _calculate_pathway_dominance_for_scope(spatial_df_subset: pd.DataFrame, inte
     logger.debug(f"    Calculating pathway dominance for scope with {len(spatial_df_subset)} spots...")
     
     if spatial_df_subset.empty or 'gene' not in spatial_df_subset.columns:
+        logger.warning("    Skipping pathway dominance: Missing required columns (gene) or empty subset.")
         return []
 
     # 1. Find all L/R present in the scope
@@ -167,24 +168,22 @@ def _calculate_pathway_dominance_for_scope(spatial_df_subset: pd.DataFrame, inte
 
     # 5. Analyze and score the *possible* interaction pairs
     scored_pairs = []
+
     for _, interaction in possible_interactions.iterrows():
         ligand = interaction['ligand']
         receptor_complex = str(interaction['receptor']) 
         
-        # Ligand must be in normalized expression dict (was present and relevant)
         if ligand not in gene_normalized_expression:
             continue 
             
         ligand_normalized = gene_normalized_expression[ligand]
         
-        # Calculate average normalized expression for receptor components *present AND relevant*
         receptor_components = _split_receptor_complex(receptor_complex)
         receptor_norm_expr_values = []
         for component in receptor_components:
-            if component in gene_normalized_expression: # Check if component was present and included in normalization
+            if component in gene_normalized_expression:
                 receptor_norm_expr_values.append(gene_normalized_expression[component])
         
-        # Only score if at least one receptor component has a normalized expression value
         if not receptor_norm_expr_values:
             continue
             
@@ -200,7 +199,7 @@ def _calculate_pathway_dominance_for_scope(spatial_df_subset: pd.DataFrame, inte
             'score': normalized_score
         })
 
-    # 6. Sort by score and return
+    # Sort by score and return
     if not scored_pairs:
         return []
         
@@ -208,7 +207,7 @@ def _calculate_pathway_dominance_for_scope(spatial_df_subset: pd.DataFrame, inte
     pairs_df = pairs_df.sort_values('score', ascending=False)
     
     logger.debug(f"    Scored {len(pairs_df)} interactions for the scope.")
-    return pairs_df.to_dict('records')
+    return pairs_df.to_dict('records') # Return no longer includes points
 
 def run_pathway_dominance_pipeline(spatial_df: pd.DataFrame, interactions_df: pd.DataFrame) -> Dict[str, List[Dict[str, Any]]]:
     """Runs the pathway dominance calculation for whole tissue and each layer."""
@@ -298,14 +297,14 @@ def _calculate_module_context_for_scope(modules_df: pd.DataFrame, pathway_result
 
     return module_context_results
 
-def run_module_context_pipeline(spatial_df: pd.DataFrame, interactions_df: pd.DataFrame, modules_df: pd.DataFrame, full_pathway_results: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List[Dict[str, Any]]]:
+def run_module_context_pipeline(spatial_df: pd.DataFrame, interactions_df: pd.DataFrame, modules_df: pd.DataFrame, full_pathway_results: Dict[str, Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     """Runs the module context calculation for whole tissue and each layer."""
     logger.info("Running Module Context Pipeline...")
     results = {}
     if 'layer' not in spatial_df.columns:
         logger.error("'layer' column not found in spatial data. Cannot run module context per layer.")
         # Calculate only for whole tissue if pathway results exist
-        pathway_subset = full_pathway_results.get('whole_tissue', [])
+        pathway_subset = full_pathway_results.get('whole_tissue', {}).get('pathway_dominance', [])
         return {'whole_tissue': _calculate_module_context_for_scope(modules_df, pathway_subset)} 
         
     try:
@@ -319,8 +318,8 @@ def run_module_context_pipeline(spatial_df: pd.DataFrame, interactions_df: pd.Da
     for scope in scopes:
         logger.info(f"  Processing Module Context scope: {scope}")
         try:
-            # Get the relevant pathway results for this scope
-            pathway_subset = full_pathway_results.get(str(scope), []) # Use str(scope) for lookup
+            # Get the relevant pathway results list for this scope
+            pathway_subset = full_pathway_results.get(str(scope), {}).get('pathway_dominance', []) 
             
             # Module context calculation doesn't directly need the spatial subset,
             # only the pathway results for the scope and the global modules_df.

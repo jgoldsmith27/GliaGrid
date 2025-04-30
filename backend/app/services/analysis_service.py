@@ -109,38 +109,27 @@ class AnalysisService:
     # Remove _update_job_status - use self.job_service.update_job_status directly
 
     async def run_analysis_background(self, job_id: str, payload: AnalysisPayload):
-        """The actual analysis function intended to be run in the background.
-
-        Loads data, runs analysis stages, and updates job status via JobService.
-        Args:
-            job_id: The unique identifier for this analysis job (already created).
-            payload: The analysis request payload containing file IDs and mappings (already stored in context).
-        """
-        # Payload should already be in context via job_service.store_job_context in start_analysis
         logger.info(f"Background task started for job ID: {job_id}")
         final_results = {}
         try:
-            # 0. Update status to running via JobService
-            status_update = {"status": "running", "message": "Loading data...", "progress": 0.1}
-            await self.job_service.update_job_status(job_id, **status_update)
+            # 0. Update status to running
+            await self.job_service.update_job_status(job_id, status="running", message="Loading data...", progress=0.1)
             logger.info(f"[Job {job_id}] Status: Running, Progress: 10% (Loading data...)")
 
-            # 1. Get file paths and load/standardize data
-            # Retrieve payload from context
-            job_context = self.job_service.get_job_context(job_id)
-            if not job_context:
-                 raise Exception(f"Job context not found for job ID {job_id}")
-            # Recreate payload object if needed, or directly use dict keys
-            # Assuming job_context IS the payload dict here
-            spatial_path = FileService.get_file_path(job_context['spatialFileId'])
-            interactions_path = FileService.get_file_path(job_context['interactionsFileId'])
-            modules_path = FileService.get_file_path(job_context['modulesFileId'])
-            spatial_mapping = AnalysisMapping(**job_context['spatialMapping'])
-            interactions_mapping = AnalysisMapping(**job_context['interactionsMapping'])
-            modules_mapping = AnalysisMapping(**job_context['modulesMapping'])
+            # 1. Get file paths and mappings directly from the payload argument
+            # REMOVED: job_context = self.job_service.get_job_context(job_id)
+            # REMOVED: if not job_context: ...
+            
+            # Use payload attributes directly
+            spatial_path = FileService.get_file_path(payload.spatialFileId)
+            interactions_path = FileService.get_file_path(payload.interactionsFileId)
+            modules_path = FileService.get_file_path(payload.modulesFileId)
+            # Mappings are already AnalysisMapping objects within the payload
+            spatial_mapping = payload.spatialMapping
+            interactions_mapping = payload.interactionsMapping
+            modules_mapping = payload.modulesMapping
 
-            status_update = {"message": "Standardizing data...", "progress": 0.2}
-            await self.job_service.update_job_status(job_id, **status_update)
+            await self.job_service.update_job_status(job_id, message="Standardizing data...", progress=0.2)
             logger.info(f"[Job {job_id}] Status: Running, Progress: 20% (Standardizing data...)")
             
             spatial_df = self._load_and_standardize(spatial_path, spatial_mapping, STANDARDIZED_SPATIAL_COLS)
@@ -148,81 +137,93 @@ class AnalysisService:
             modules_df = self._load_and_standardize(modules_path, modules_mapping, STANDARDIZED_MODULE_COLS)
             logger.info(f"Job {job_id}: Data loaded successfully.")
 
-            # 2. Run Stage 1: Initial Counts
-            status_update = {"message": "Calculating ligand/receptor counts...", "progress": 0.4}
-            await self.job_service.update_job_status(job_id, **status_update)
+            # 2. Run Stage 1: Initial Counts (Sequential)
+            await self.job_service.update_job_status(job_id, message="Calculating ligand/receptor counts...", progress=0.4)
             logger.info(f"[Job {job_id}] Status: Running, Progress: 40% (Calculating counts...)")
             
             logger.info(f"Job {job_id}: Running Stage 1 Counts...")
             count_results = run_stage1_counts_pipeline(spatial_df, interactions_df)
-            # Structure results: {scope: {analysis_type: data}}
             for scope, counts in count_results.items():
-                if scope not in final_results: final_results[scope] = {}
-                final_results[scope]['ligand_receptor_counts'] = counts
+                scope_str = str(scope)
+                if scope_str not in final_results: final_results[scope_str] = {}
+                final_results[scope_str]['ligand_receptor_counts'] = counts
             logger.info(f"Job {job_id}: Stage 1 Counts Complete.")
             
-            status_update = {"progress": 0.5}
-            await self.job_service.update_job_status(job_id, **status_update)
+            await self.job_service.update_job_status(job_id, progress=0.5)
             logger.info(f"[Job {job_id}] Status: Running, Progress: 50%")
 
-            # 3. Run Stage 2 (Concurrent - simulated sequentially here)
-
-            # 3a. Pathway Dominance
-            status_update = {"message": "Calculating pathway dominance...", "progress": 0.6}
-            await self.job_service.update_job_status(job_id, **status_update)
+            # 3. Run Stage 2a: Pathway Dominance (Sequential)
+            await self.job_service.update_job_status(job_id, message="Calculating pathway dominance...", progress=0.6)
             logger.info(f"[Job {job_id}] Status: Running, Progress: 60% (Calculating pathway dominance...)")
             
             logger.info(f"Job {job_id}: Running Pathway Dominance...")
+            # This now returns scores only, no points
             pathway_results = run_pathway_dominance_pipeline(spatial_df, interactions_df)
-            for scope, pathways in pathway_results.items():
-                 if scope not in final_results: final_results[scope] = {}
-                 final_results[scope]['pathway_dominance'] = pathways # pathways assumed to be list of dicts
-            logger.info(f"Job {job_id}: Pathway Dominance Complete.")
             
-            status_update = {"progress": 0.8}
-            await self.job_service.update_job_status(job_id, **status_update)
+            # Store the pathway dominance results directly
+            for scope, pathways in pathway_results.items():
+                 scope_str = str(scope)
+                 if scope_str not in final_results: final_results[scope_str] = {}
+                 final_results[scope_str]['pathway_dominance'] = pathways 
+            
+            logger.info(f"Job {job_id}: Pathway Dominance Complete.")
+            await self.job_service.update_job_status(job_id, progress=0.8)
             logger.info(f"[Job {job_id}] Status: Running, Progress: 80%")
 
-            # 3b. Module Context
-            status_update = {"message": "Calculating module context...", "progress": 0.85}
-            await self.job_service.update_job_status(job_id, **status_update)
+            # 4. Run Stage 2b: Module Context (Sequential)
+            await self.job_service.update_job_status(job_id, message="Calculating module context...", progress=0.85)
             logger.info(f"Job {job_id}: Running Module Context...")
-            # Module context might depend on pathway results (e.g., significant pairs)
-            # Pass pathway_results if needed by the actual function
-            module_context_results = run_module_context_pipeline(spatial_df, interactions_df, modules_df, pathway_results)
+            # Pass the results dict containing pathway_dominance per scope
+            module_context_results = run_module_context_pipeline(spatial_df, interactions_df, modules_df, final_results)
             for scope, modules in module_context_results.items():
-                 if scope not in final_results: final_results[scope] = {}
-                 final_results[scope]['module_context'] = modules # modules assumed to be list of dicts
+                 scope_str = str(scope)
+                 if scope_str not in final_results: final_results[scope_str] = {}
+                 final_results[scope_str]['module_context'] = modules
             logger.info(f"Job {job_id}: Module Context Complete.")
 
-            # 4. Update status to success via JobService
+            # --- DEBUG: Log final_results before structuring ---
+            logger.debug(f"[Job {job_id}] Final analysis outputs before structuring: {final_results}")
+            # -------------------------------------------------
+
+            # 5. Update status to success
+            # Structure results to include inputs (payload) and outputs (final_results)
+            structured_results = {
+                "inputs": {
+                    "files": {
+                        "spatialFileId": payload.spatialFileId,
+                        "interactionsFileId": payload.interactionsFileId,
+                        "modulesFileId": payload.modulesFileId
+                    },
+                    "mappings": {
+                        "spatialMapping": payload.spatialMapping.dict(), # Convert Pydantic model to dict
+                        "interactionsMapping": payload.interactionsMapping.dict(),
+                        "modulesMapping": payload.modulesMapping.dict()
+                    }
+                },
+                "outputs": final_results # Contains results grouped by scope
+            }
+            
+            # --- DEBUG: Log the final structured results to be saved ---
+            logger.debug(f"[Job {job_id}] Structured results being saved: {structured_results}")
+            # ---------------------------------------------------------
+
             status_update = {
                 "status": "success",
                 "message": "Analysis completed successfully.",
                 "progress": 1.0,
-                "results": final_results
+                "results": structured_results 
             }
             await self.job_service.update_job_status(job_id, **status_update)
             logger.info(f"[Job {job_id}] Status: Success, Progress: 100% (Analysis complete)")
 
-        except HTTPException as e:
-            # Handle exceptions raised during loading/standardization or analysis
-            error_message = f"Error during analysis: {e.detail}"
-            logger.error(f"Job {job_id}: Failed with HTTPException - {error_message}")
+        except Exception as e: # Catch exceptions from any stage
+            error_message = f"Analysis failed: {str(e)}"
+            logger.exception(f"Job {job_id}: Failed - {error_message}")
             status_update = {"status": "failed", "message": error_message}
             await self.job_service.update_job_status(job_id, **status_update)
             logger.info(f"[Job {job_id}] Status: Failed")
-        except Exception as e:
-            # Catch any other unexpected errors
-            error_message = f"An unexpected error occurred during analysis: {str(e)}"
-            logger.exception(f"Job {job_id}: Failed with Exception - {error_message}")
-            status_update = {"status": "failed", "message": error_message}
-            await self.job_service.update_job_status(job_id, **status_update)
-            logger.info(f"[Job {job_id}] Status: Failed (Unexpected Error)")
         finally:
-            # Cleanup logic remains the same for now
-            # TODO: Implement delayed or on-demand cleanup
-            pass
+            pass # Cleanup if needed
 
     # --- NEW Method for Custom Selection Analysis --- 
     async def run_custom_analysis_background(self, job_id: str, request: CustomAnalysisRequest):

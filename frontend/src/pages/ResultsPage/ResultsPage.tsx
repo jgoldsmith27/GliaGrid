@@ -42,8 +42,10 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
 
   // Effect to extract available layers from jobStatus (updated from hook)
   useEffect(() => {
-      if (jobStatus?.results) {
-         setAvailableLayers(Object.keys(jobStatus.results).filter(k => k !== 'whole_tissue'));
+      // Access results from the 'outputs' field
+      const outputs = jobStatus?.results?.outputs;
+      if (outputs) {
+         setAvailableLayers(Object.keys(outputs).filter(k => k !== 'whole_tissue'));
       } else {
          setAvailableLayers([]); // Clear if no results
       }
@@ -62,7 +64,9 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
 
   // --- Effect to Process Results and Combine Data ---
   useEffect(() => {
-      if (!jobStatus || !jobStatus.results) {
+      // Access results from the 'outputs' field
+      const outputs = jobStatus?.results?.outputs;
+      if (!jobStatus || !outputs) { 
           setCombinedAnalysisData([]);
           setSelectedPair(null);
           return;
@@ -70,9 +74,9 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
 
       let scopeData: any = null;
       if (selectedScope === 'whole_tissue') {
-          scopeData = jobStatus.results.whole_tissue;
+          scopeData = outputs.whole_tissue;
       } else if (selectedScope === 'layers' && selectedLayers.length > 0) {
-          scopeData = jobStatus.results[selectedLayers[0]];
+          scopeData = outputs[selectedLayers[0]];
       } else if (selectedScope === 'custom') {
           // Custom scope doesn't rely on combined data from results in the same way
           setCombinedAnalysisData([]);

@@ -13,8 +13,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readBackendFile: (fileId, options) => ipcRenderer.invoke('read-backend-file', fileId, options),
   getJobMetadata: (jobId) => ipcRenderer.invoke('get-job-metadata', jobId),
   
-  // Visualization data access
-  readVisualizationData: (jobId, options) => ipcRenderer.invoke('read-visualization-data', jobId, options),
+  // Visualization data access - REMOVED
+  // readVisualizationData: (jobId, options) => ipcRenderer.invoke('read-visualization-data', jobId, options),
 
   // Event-driven job status API
   subscribeJobStatus: (jobId) => ipcRenderer.invoke('subscribe-job-status', jobId),

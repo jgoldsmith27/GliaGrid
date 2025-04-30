@@ -259,42 +259,117 @@ ipcMain.handle('read-backend-file', async (event, fileId, options = {}) => {
   }
 });
 
-// Helper function to read CSV in chunks
+// Helper function to read CSV in chunks with filtering
 async function readCsvChunked(filePath, options = {}) {
-  const { offset = 0, limit = 1000, sampleRate = 1.0 } = options;
-  
+  // Destructure options with defaults
+  const {
+    offset = 0,
+    limit = null, // Default to no limit if not specified
+    sampleRate = 1.0,
+    filter = null, // New filter option: { column: string, values: Array<string> }
+    columns = null // New option to select specific columns: Array<string>
+  } = options;
+
+  // Validate filter option
+  const useFilter = filter && filter.column && Array.isArray(filter.values) && filter.values.length > 0;
+  const filterColumn = useFilter ? filter.column : null;
+  const filterValuesSet = useFilter ? new Set(filter.values) : null;
+
+  // Validate columns option
+  const useColumns = Array.isArray(columns) && columns.length > 0;
+  const columnSet = useColumns ? new Set(columns) : null;
+
+  console.log(`[main.js] readCsvChunked: Reading ${filePath}`);
+  if (useFilter) console.log(`[main.js] readCsvChunked: Applying filter on column '${filterColumn}' for values:`, filter.values);
+  if (useColumns) console.log(`[main.js] readCsvChunked: Selecting columns:`, columns);
+
   return new Promise((resolve, reject) => {
     const results = [];
-    let rowCount = 0;
-    let skippedCount = 0;
-    
+    let rowCount = 0; // Counts rows processed *before* filtering/sampling
+    let skippedByOffset = 0;
+    let skippedBySample = 0;
+    let skippedByFilter = 0;
+    let headerChecked = false;
+
     Papa.parse(fs.createReadStream(filePath), {
       header: true,
       skipEmptyLines: true,
       step: (row) => {
         rowCount++;
-        
-        // Apply sampling and offset/limit
-        if (rowCount <= offset) return;
-        if (limit && results.length >= limit) return;
-        
-        // Apply sampling
+
+        // Ensure header contains necessary columns if filtering or selecting
+        if (!headerChecked) {
+          if (useFilter && !(filterColumn in row.data)) {
+             stream.abort(); // Stop parsing
+             return reject(new Error(`Filter column '${filterColumn}' not found in CSV header.`));
+          }
+          if (useColumns && !columns.every(col => col in row.data)) {
+             stream.abort();
+             const missingCols = columns.filter(col => !(col in row.data));
+             return reject(new Error(`Selected column(s) not found in CSV header: ${missingCols.join(', ')}`));
+          }
+          headerChecked = true;
+        }
+
+        // 1. Apply Offset
+        if (rowCount <= offset) {
+          skippedByOffset++;
+          return;
+        }
+
+        // 2. Apply Filtering (if specified)
+        if (useFilter) {
+          const value = row.data[filterColumn];
+          if (!filterValuesSet.has(value)) {
+            skippedByFilter++;
+            return;
+          }
+        }
+
+        // 3. Apply Sampling (if specified)
         if (sampleRate < 1.0 && Math.random() > sampleRate) {
-          skippedCount++;
+          skippedBySample++;
           return;
         }
         
-        results.push(row.data);
+        // 4. Apply Limit (based on results accumulated *after* filtering/sampling)
+        if (limit !== null && results.length >= limit) {
+          // Once limit is reached, abort the parsing stream for efficiency
+          // Need access to the stream object, get it from the config
+          // (Assuming PapaParse passes the stream or control object)
+          // This part might need adjustment based on PapaParse specifics
+          // For now, just return to stop adding results
+          return; 
+        }
+
+        // 5. Select Columns (if specified)
+        let resultData = row.data;
+        if (useColumns) {
+          resultData = {};
+          for (const col of columnSet) {
+            resultData[col] = row.data[col];
+          }
+        }
+
+        results.push(resultData);
       },
-      complete: () => {
+      complete: (parseResult) => {
+        // If limit was hit, slice the results just in case extra rows were processed before stream aborted
+        const finalResults = limit !== null ? results.slice(0, limit) : results;
+        
+        console.log(`[main.js] readCsvChunked: Completed. Total rows scanned: ${rowCount}, Returned: ${finalResults.length}, Skipped (Offset: ${skippedByOffset}, Sample: ${skippedBySample}, Filter: ${skippedByFilter})`);
         resolve({
-          data: results,
-          totalRows: rowCount,
-          sampledRows: results.length,
-          skippedRows: skippedCount
+          data: finalResults,
+          totalRows: rowCount, // Total rows scanned in the file (or up to abort)
+          returnedRows: finalResults.length,
+          skippedRows: skippedByOffset + skippedBySample + skippedByFilter,
+          // Add metadata about filtering/sampling?
         });
       },
-      error: (error) => reject(error)
+      error: (error) => {
+        console.error(`[main.js] readCsvChunked: Error parsing ${filePath}:`, error);
+        reject(error);
+      }
     });
   });
 }
@@ -369,26 +444,37 @@ async function fetchJobStatus(jobId) {
   return await response.json();
 }
 
-// Get visualization data directly from backend
-ipcMain.handle('read-visualization-data', async (event, jobId, options = {}) => {
+// --- Get Job Metadata/Context ---
+ipcMain.handle('get-job-metadata', async (event, jobId) => {
+  console.log(`[main.js] Received request for metadata for job ${jobId}`);
+  const apiUrl = `http://localhost:8000/api/analysis/context/${jobId}`; // Use the new endpoint
   try {
-    // Build query parameters
-    const queryParams = new URLSearchParams();
-    if (options.resolution) queryParams.append('resolution', options.resolution);
-    if (options.region) queryParams.append('region', JSON.stringify(options.region));
-    if (options.limit) queryParams.append('limit', options.limit);
-    
-    const queryString = queryParams.toString() ? `?${queryParams.toString()}` : '';
-    const response = await fetch(`http://localhost:8000/api/visualization/${jobId}/points${queryString}`);
+    console.log(`[main.js] Fetching context from: ${apiUrl}`);
+    const response = await fetch(apiUrl);
     
     if (!response.ok) {
-      throw new Error(`API returned status ${response.status}`);
+      let errorDetail = `API returned status ${response.status}`; 
+      try {
+         // Try to get more specific error from backend response body
+         const errorBody = await response.json();
+         errorDetail = errorBody.detail || errorDetail;
+      } catch (_) { /* Ignore if response body is not JSON */ }
+      throw new Error(errorDetail + ` fetching context for job ${jobId}`);
     }
     
-    return await response.json();
+    const contextResponse = await response.json(); // Expects { job_id: ..., context: ... }
+    
+    if (!contextResponse || contextResponse.context === undefined) {
+        // Handle case where backend endpoint returns OK but context is missing/null
+        throw new Error(`Context field missing in response from ${apiUrl}`);
+    }
+    
+    console.log(`[main.js] Successfully fetched context for job ${jobId}`);
+    return { success: true, metadata: contextResponse.context };
+
   } catch (error) {
-    console.error(`[main.js] Error fetching visualization data for ${jobId}:`, error);
-    throw error;
+    console.error(`[main.js] Error in get-job-metadata for job ${jobId}:`, error);
+    return { success: false, error: error.message };
   }
 });
 

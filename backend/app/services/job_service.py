@@ -77,29 +77,36 @@ class JobService:
             return
 
         # Update in-memory job status
+        current_status = self._jobs_status[job_id]
         if status is not None:
-            self._jobs_status[job_id]["status"] = status
+            current_status["status"] = status
         if progress is not None:
-            # Clamp progress between 0.0 and 1.0
-            self._jobs_status[job_id]["progress"] = max(0.0, min(1.0, progress))
+            current_status["progress"] = max(0.0, min(1.0, progress))
         if message is not None:
-            self._jobs_status[job_id]["message"] = message
+            current_status["message"] = message
         if results is not None:
-            self._jobs_status[job_id]["results"] = results
+            current_status["results"] = results # Store full results
 
-        print(f"JobService: Updated status for job {job_id}: {self._jobs_status[job_id]}")
+        # Create a summary for logging (exclude results)
+        log_summary = {
+            key: value 
+            for key, value in current_status.items() 
+            if key != 'results'
+        }
+        print(f"JobService: Updated status for job {job_id}: {log_summary}") # Print summary only
         
-        # Publish job status via ZeroMQ (true event-driven approach)
+        # Publish FULL job status (including results) via ZeroMQ
         if publisher is not None:
             try:
-                # Topic is the job ID, message is the serialized status
                 topic = f"job.{job_id}"
+                # Ensure the full status dict (current_status) is published
                 message_data = json.dumps({
                     "job_id": job_id,
-                    **self._jobs_status[job_id]
+                    **current_status # Publish the full status with results
                 })
                 publisher.send_multipart([topic.encode(), message_data.encode()])
-                print(f"JobService: Published status update for job {job_id} via ZeroMQ")
+                # Limit ZMQ publish log message verbosity too
+                print(f"JobService: Published status update summary for job {job_id} via ZeroMQ: {log_summary}") 
             except Exception as e:
                 print(f"JobService: Error publishing to ZeroMQ: {e}")
 
@@ -134,18 +141,21 @@ class JobService:
 
     def get_job_context(self, job_id: str) -> Optional[Dict[str, Any]]:
         """
-        Retrieves the context data associated with a job.
+        Retrieves the COMPLETE context/results associated with a completed job.
+        NOTE: This now retrieves from the main status dictionary, often the 'results' field.
 
         Args:
             job_id: The ID of the job.
 
         Returns:
-            The context dictionary, or None if the job doesn't exist.
+            The full status dictionary containing results, or None if the job doesn't exist.
+            The caller (API endpoint) will likely extract the 'results' field.
         """
         if not self.job_exists(job_id):
-            print(f"JobService: Attempted to get context for non-existent job {job_id}")
+            print(f"JobService: Attempted to get context/status for non-existent job {job_id}")
             return None
-        return self._job_contexts.get(job_id)
+        # Return the entire status dictionary, which includes the 'results' field when complete
+        return self._jobs_status.get(job_id)
         
     def cleanup_zmq(self):
         """

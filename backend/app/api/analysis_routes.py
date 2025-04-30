@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Body, BackgroundTasks
 from pydantic import BaseModel, Field
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Any
 import asyncio
 import uuid
 import json
@@ -46,6 +46,11 @@ class JobStatusResponse(BaseModel):
     progress: Optional[float] = Field(None, description="Optional progress percentage (0.0 to 1.0)")
     results: Optional[Dict] = Field(None, description="Analysis results if status is 'success'")
 
+# NEW: Response model for the job context endpoint
+class JobContextResponse(BaseModel):
+    job_id: str
+    context: Optional[Dict[str, Any]] = Field(None, description="The initial payload and context stored for the job")
+
 # Remove the WebSocket Connection Management section and replace with REST endpoint
 @router.get("/status/{job_id}", response_model=JobStatusResponse)
 async def get_job_status(job_id: str, job_service: JobService = Depends(get_job_service)):
@@ -57,8 +62,44 @@ async def get_job_status(job_id: str, job_service: JobService = Depends(get_job_
     if not status:
         raise HTTPException(status_code=404, detail=f"Job ID {job_id} not found")
     
-    # Add job_id for consistency
+    # Return job status (might or might not include context depending on JobService implementation)
     return {**status, "job_id": job_id}
+
+# NEW: Endpoint to get job context
+@router.get("/context/{job_id}", response_model=JobContextResponse)
+async def get_job_context_endpoint(job_id: str, job_service: JobService = Depends(get_job_service)):
+    """
+    Get the stored context/results for a specific job.
+    This now retrieves the job's status dictionary and extracts the 'results' field.
+    """
+    full_status = job_service.get_job_context(job_id) # Renamed variable for clarity
+    if full_status is None: 
+        # Check if the job *exists* first for a better error message
+        if not job_service.job_exists(job_id):
+             raise HTTPException(status_code=404, detail=f"Job ID {job_id} not found")
+        else:
+             # Job exists but get_job_context returned None (shouldn't happen with new logic)
+             logger.error(f"Job {job_id} exists but get_job_context returned None unexpectedly.")
+             raise HTTPException(status_code=500, detail=f"Internal error retrieving context for job ID {job_id}")
+
+    # Extract the 'results' field from the full status to return as the context
+    job_results = full_status.get("results")
+    
+    # Check if results are available (job might still be running or failed without results)
+    if job_results is None:
+        logger.warning(f"Context requested for job {job_id}, but results are not yet available (status: {full_status.get('status')}). Returning empty context.")
+        # Depending on frontend expectation, maybe return 404 or the status?
+        # For now, return empty context as per original model allowing Optional[Dict]
+        job_results = {}
+        # Alternatively, raise an error if results are expected:
+        # raise HTTPException(status_code=404, detail=f"Results not yet available for job {job_id} (status: {full_status.get('status')})")
+
+    # Ensure the extracted results are a dictionary, even if empty
+    if not isinstance(job_results, dict):
+        logger.error(f"Results for job {job_id} are not a dictionary: {type(job_results)}. Returning empty context.")
+        job_results = {}
+
+    return JobContextResponse(job_id=job_id, context=job_results)
 
 # Dependency to get AnalysisService instance (without WebSocket dependency)
 def get_analysis_service(job_service: JobService = Depends(get_job_service)) -> AnalysisService:
