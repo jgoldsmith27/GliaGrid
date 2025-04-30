@@ -3,14 +3,11 @@ import { useParams } from 'react-router-dom'; // Import useParams
 import styles from './ResultsPage.module.css';
 import LoadingSpinner from '../../components/LoadingSpinner/LoadingSpinner';
 import SummaryTabContent from '../../components/ResultsPage/SummaryTabContent'; // New name
-import ScopeSelector from '../../components/ScopeSelector/ScopeSelector'; // Assuming this exists
+import ScopeSelector, { ScopeType } from '../../components/ScopeSelector/ScopeSelector'; // Import ScopeSelector and its exported type
 import LayerSelector from '../../components/LayerSelector/LayerSelector'; // Assuming this exists
 import { PathwayDominanceResult, ModuleContextResult } from '../../types/analysisResults'; // Import types
-
-// Define types for the selections
-type ScopeType = 'whole_tissue' | 'layers';
-// type AnalysisType = 'summary' | 'pathway_dominance' | 'module_context'; // No longer needed
-// type ResultsTab = 'Summary' | 'Custom'; // Removed
+// Import the new custom hook
+import useJobStatusWebSocket from '../../hooks/useJobStatusWebSocket';
 
 // Define the structure for combined data
 export interface CombinedInteractionData {
@@ -32,10 +29,8 @@ export interface CombinedInteractionData {
 const ResultsPage: React.FC = () => { // Define as standard functional component
   const { jobId } = useParams<{ jobId: string }>(); // Get jobId from URL
   
-  const [jobStatus, setJobStatus] = useState<any>(null); // Store full status/results
-  const [isConnected, setIsConnected] = useState<boolean>(false); // Track WebSocket connection
-  const [isLoading, setIsLoading] = useState<boolean>(true); // Still useful for initial load/connection
-  const [error, setError] = useState<string | null>(null);
+  // Call the custom hook to manage WebSocket connection and state
+  const { jobStatus, isConnected, isLoading, error } = useJobStatusWebSocket(jobId);
   
   // --- UI/Data State ---
   // const [currentTab, setCurrentTab] = useState<ResultsTab>('Summary'); // Removed
@@ -45,105 +40,25 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
   const [selectedPair, setSelectedPair] = useState<[string, string] | null>(null);
   const [combinedAnalysisData, setCombinedAnalysisData] = useState<CombinedInteractionData[]>([]);
 
+  // Effect to extract available layers from jobStatus (updated from hook)
   useEffect(() => {
-    if (!jobId) {
-      setError('No analysis job ID provided.');
-      setIsLoading(false);
-      return;
-    }
-
-    // --- WebSocket Logic ---
-    const wsUrl = `ws://localhost:8000/ws/analysis/status/${jobId}`;
-    const ws = new WebSocket(wsUrl);
-
-    ws.onopen = () => {
-      console.log(`[WebSocket] Connected to ${wsUrl}`);
-      setIsConnected(true);
-      setIsLoading(true); // Reset loading state on connect/reconnect
-      setError(null);
-      // No need to fetch initial status, endpoint sends it on connect
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        console.log('[WebSocket] Message received:', data);
-        setJobStatus(data);
-        if (data.results) {
-            setAvailableLayers(Object.keys(data.results).filter(k => k !== 'whole_tissue'));
-        }
-
-        // Update loading state based on received status
-        if (data.status === 'success' || data.status === 'failed' || data.status === 'error') {
-          setIsLoading(false);
-        } else {
-          setIsLoading(true); // Still processing
-        }
-        
-        // Handle specific error messages from WebSocket
-        if (data.status === 'error') {
-            setError(data.message || 'An error occurred via WebSocket.');
-        }
-
-      } catch (parseError) {
-        console.error('[WebSocket] Error parsing message:', parseError, 'Data:', event.data);
-        setError('Received invalid data from server.');
-        setIsLoading(false);
+      if (jobStatus?.results) {
+         setAvailableLayers(Object.keys(jobStatus.results).filter(k => k !== 'whole_tissue'));
+      } else {
+         setAvailableLayers([]); // Clear if no results
       }
-    };
-
-    ws.onerror = (event) => {
-      console.error('[WebSocket] Error:', event);
-      setError('WebSocket connection error. Please try refreshing the page.');
-      setIsConnected(false);
-      setIsLoading(false);
-    };
-
-    ws.onclose = (event) => {
-      console.log(`[WebSocket] Disconnected from ${wsUrl}. Code: ${event.code}, Reason: ${event.reason}`);
-      setIsConnected(false);
-      // Optionally set loading to false only if the final status wasn't success/failed
-      if (jobStatus?.status !== 'success' && jobStatus?.status !== 'failed') {
-         setIsLoading(false);
-         // Keep existing status unless it was clearly an error during connection
-         if (!error && event.code !== 1000) { // 1000 = Normal closure
-            setError('Disconnected. Analysis might be incomplete. Refresh?');
-         }
-      }
-    };
-
-    // Cleanup function to close WebSocket when component unmounts
-    return () => {
-      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-          console.log(`[WebSocket] Closing connection to ${wsUrl}`);
-          ws.close(1000, "Component unmounting"); // Normal closure
-      }
-    };
-    // --- End WebSocket Logic ---
-
-    /* Remove Polling Logic
-    const fetchStatus = async () => {
-      // ... removed ...
-    };
-    fetchStatus();
-    */
-
-  }, [jobId]); // Re-run effect if jobId changes
+  }, [jobStatus]); // Depend on jobStatus from the hook
 
   // Effect to ensure a layer is selected when in 'layers' scope
   useEffect(() => {
-    // Extract available layers from results
-    const availableLayers = jobStatus?.results ? 
-      Object.keys(jobStatus.results).filter(k => k !== 'whole_tissue') : [];
-    
-    // If we're in layer scope and no layer is selected, select the first available layer
+    // Use the derived availableLayers state
     if (selectedScope === 'layers' && 
         (selectedLayers.length === 0 || !availableLayers.includes(selectedLayers[0]))) {
       if (availableLayers.length > 0) {
         setSelectedLayers([availableLayers[0]]);
       }
     }
-  }, [selectedScope, jobStatus, selectedLayers]);
+  }, [selectedScope, availableLayers, selectedLayers]); // Depend on derived layers
 
   // --- Effect to Process Results and Combine Data ---
   useEffect(() => {
@@ -153,11 +68,17 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
           return;
       }
 
-      let scopeData = selectedScope === 'whole_tissue' 
-          ? jobStatus.results.whole_tissue 
-          : selectedLayers.length > 0 
-              ? jobStatus.results[selectedLayers[0]]
-              : null;
+      let scopeData: any = null;
+      if (selectedScope === 'whole_tissue') {
+          scopeData = jobStatus.results.whole_tissue;
+      } else if (selectedScope === 'layers' && selectedLayers.length > 0) {
+          scopeData = jobStatus.results[selectedLayers[0]];
+      } else if (selectedScope === 'custom') {
+          // Custom scope doesn't rely on combined data from results in the same way
+          setCombinedAnalysisData([]);
+          setSelectedPair(null);
+          return;
+      }
 
       if (!scopeData || !scopeData.pathway_dominance || !scopeData.module_context) {
           console.warn("Missing pathway_dominance or module_context data for scope:", selectedScope, selectedLayers[0]);
@@ -196,7 +117,7 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
       
       // If the currently selected pair is no longer in the combined data (e.g., scope changed), reset it
       if (selectedPair && !combined.some(item => item.ligand === selectedPair[0] && item.receptor === selectedPair[1])) {
-           setSelectedPair(null); // Reset to null instead of first item
+           setSelectedPair(null);
       }
       // Ensure selectedPair is null if combined data is empty
       if (combined.length === 0) {
@@ -205,16 +126,21 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
       
   }, [jobStatus, selectedScope, selectedLayers]); // Re-run when results or scope change
 
-  const handleSelectPair = useCallback((pair: [string, string]) => {
+  const handleSelectPair = useCallback((pair: [string, string] | null) => {
+    console.log("[ResultsPage] Setting selected pair:", pair);
     setSelectedPair(pair);
   }, []);
   
   // --- Scope Change Handlers ---
   const handleScopeChange = useCallback((scope: ScopeType) => {
+    console.log("[ResultsPage] Scope changed to:", scope);
     setSelectedScope(scope);
-    // Reset selected layers when switching to whole_tissue
     if (scope === 'whole_tissue') {
         setSelectedLayers([]);
+        // Optionally reset pair: setSelectedPair(null);
+    } else if (scope === 'custom') {
+        setSelectedLayers([]);
+        setSelectedPair(null); // Reset pair for custom view
     }
   }, []);
 
@@ -233,7 +159,7 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
     );
   }
   
-  if (isLoading && isConnected) {
+  if (isLoading && (!jobStatus || jobStatus.status === 'processing')) {
     return (
       <div className={styles.container}>
         <LoadingSpinner message={jobStatus?.message || "Loading Analysis Results..."} />
@@ -245,7 +171,7 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
   }
 
   // Always show loading until we have valid results
-  if (!jobStatus || !jobStatus.results) {
+  if (!jobStatus || (jobStatus.status !== 'success' && !isLoading)) {
     return (
       <div className={styles.container}>
         <LoadingSpinner message="Waiting for analysis results..." />
@@ -274,8 +200,13 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
   // We have successful results here
   // const results = jobStatus.results; // Keep results accessible if needed
 
-  // Extract available layers from results for the LayerSelector - REMOVE THIS
-  // const availableLayers = results ? Object.keys(results).filter(k => k !== 'whole_tissue') : [];
+  // Determine which layer name to pass to SummaryTabContent for API calls
+  // For custom scope, we don't need a specific layer name for the interaction fetch (it won't run)
+  // For layer scope, use the first selected layer.
+  // For whole_tissue, use 'whole_tissue' (or whatever the API expects).
+  const scopeForApi = selectedScope === 'layers' && selectedLayers.length > 0 
+                      ? selectedLayers[0] 
+                      : selectedScope; // Fallback to 'whole_tissue' or 'custom'
 
   // --- Render Main Layout --- 
   return (
@@ -317,8 +248,10 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
                 combinedData={combinedAnalysisData}
                 selectedPair={selectedPair}
                 onSelectPair={handleSelectPair}
-                // Pass the specific layer string needed for the API call
-                selectedLayerName={selectedScope === 'layers' && selectedLayers.length > 0 ? selectedLayers[0] : 'whole_tissue'} 
+                // Pass the calculated scope name for API calls
+                apiScopeName={scopeForApi} 
+                // Keep passing the general scope type for conditional rendering if needed
+                currentScope={selectedScope} 
             />
       </div>
     </div>

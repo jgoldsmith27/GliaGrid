@@ -3,29 +3,35 @@ import { ScatterplotLayer } from '@deck.gl/layers';
 import { ScreenGridLayer, HeatmapLayer, HexagonLayer } from '@deck.gl/aggregation-layers';
 import DeckGL from '@deck.gl/react';
 import { OrthographicView, OrthographicViewState, ViewStateChangeParameters, Color } from '@deck.gl/core';
-import styles from './Visualization.module.css';
+import styles from './InteractionVisualization.module.css';
 
 interface Point {
   x: number;
   y: number;
 }
 
-interface VisualizationProps {
+interface AllPointsData {
+    x: number;
+    y: number;
+    layer: string;
+}
+
+type ScopeType = 'whole_tissue' | 'layers' | 'custom';
+
+interface InteractionVisualizationProps {
   data: {
     ligand: Point[];
     receptor: Point[];
   };
   ligandName: string;
   receptorName: string;
-  currentScope: string;
+  currentScope: 'whole_tissue' | 'layers';
 }
 
-// Helper function to calculate initial view state based on data bounds for OrthographicView
 const getInitialViewState = (ligandData: Point[], receptorData: Point[]) => {
     const allPoints = [...ligandData, ...receptorData];
     if (allPoints.length === 0) {
-        // Default view if no data
-        return { target: [0, 0, 0] as [number, number, number], zoom: 1 }; // Use target and zoom, cast type
+        return { target: [0, 0, 0] as [number, number, number], zoom: 1 };
     }
 
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -38,48 +44,40 @@ const getInitialViewState = (ligandData: Point[], receptorData: Point[]) => {
 
     const centerX = (minX + maxX) / 2;
     const centerY = (minY + maxY) / 2;
-    const width = Math.max(1, maxX - minX); // Ensure width/height are at least 1 to avoid division by zero
+    const width = Math.max(1, maxX - minX);
     const height = Math.max(1, maxY - minY);
     
-    // Calculate zoom level based on fitting the data extent into the viewport
-    // This calculation might need further tuning depending on desired padding/behavior
     const zoomX = Math.log2(window.innerWidth / width);
     const zoomY = Math.log2(window.innerHeight / height);
-    const zoom = Math.min(zoomX, zoomY) - 1; // Subtract 1 for some padding
+    const zoom = Math.min(zoomX, zoomY) - 1;
 
     return {
-        target: [centerX, centerY, 0] as [number, number, number], // Center the view, cast type explicitly
+        target: [centerX, centerY, 0] as [number, number, number],
         zoom: zoom, 
-        minZoom: -10, // Allow zooming out much further
-        maxZoom: 10 // Adjust as needed
+        minZoom: -10,
+        maxZoom: 10
     };
 };
 
-// --- Type Definitions ---
 type DensityScoringType = 'Off' | 'Ligand' | 'Receptor';
 type AggregationLayerType = 'ScreenGrid' | 'Hexagon' | 'Heatmap';
 type PointsDisplayType = 'off' | 'ligands' | 'receptors' | 'both';
 
-const Visualization: React.FC<VisualizationProps> = ({ data, ligandName, receptorName, currentScope }) => {
+const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ data, ligandName, receptorName, currentScope }) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
-  // --- Visualization Control States ---
   const [densityScoringType, setDensityScoringType] = useState<DensityScoringType>('Off'); 
   const [aggregationLayerType, setAggregationLayerType] = useState<AggregationLayerType>('ScreenGrid');
   const [pointsDisplayType, setPointsDisplayType] = useState<PointsDisplayType>('both');
 
-  // Calculate initial view state memoized based on data
   const initialViewState = useMemo(() => {
-      console.log("[Visualization] Received data:", data); // Log received data
+      console.log("[InteractionVisualization] Received data:", data);
       const state = getInitialViewState(data.ligand, data.receptor);
-      console.log("[Visualization] Calculated initialViewState:", state);
+      console.log("[InteractionVisualization] Calculated initialViewState:", state);
       return state;
-  }, [data]); // Recalculate only when data changes
+  }, [data]);
 
-  // --- Add State and Handlers for Zoom --- 
   const [viewState, setViewState] = useState<OrthographicViewState>(initialViewState as OrthographicViewState);
 
-  // Update viewState when initialViewState changes (e.g., data updates)
-  // This ensures view resets if data prop changes
   useEffect(() => {
     setViewState(initialViewState as OrthographicViewState);
   }, [initialViewState]);
@@ -107,9 +105,7 @@ const Visualization: React.FC<VisualizationProps> = ({ data, ligandName, recepto
         } as OrthographicViewState;
     });
   }, []);
-  // --- End Zoom Logic --- 
 
-  // --- Dynamically create layers based on heatmap selection ---
   const layers = useMemo(() => {
     const baseLayers = [
       new ScatterplotLayer<Point>({
@@ -117,7 +113,7 @@ const Visualization: React.FC<VisualizationProps> = ({ data, ligandName, recepto
         data: data.ligand,
         getPosition: (d) => [d.x, d.y],
         getRadius: 5,
-        getFillColor: [255, 0, 0, 180], // Red for ligands
+        getFillColor: [255, 0, 0, 180],
         pickable: true,
         radiusScale: 5,
         radiusMinPixels: 1,
@@ -128,7 +124,7 @@ const Visualization: React.FC<VisualizationProps> = ({ data, ligandName, recepto
         data: data.receptor,
         getPosition: (d) => [d.x, d.y],
         getRadius: 5,
-        getFillColor: [0, 0, 255, 180], // Blue for receptors
+        getFillColor: [0, 0, 255, 180],
         pickable: true,
         radiusScale: 5,
         radiusMinPixels: 1,
@@ -136,20 +132,16 @@ const Visualization: React.FC<VisualizationProps> = ({ data, ligandName, recepto
       }),
     ];
 
-    console.log(`[Visualization Layers] heatmapType: ${densityScoringType}, Ligands: ${data.ligand?.length || 0}, Receptors: ${data.receptor?.length || 0}`);
+    console.log(`[InteractionVisualization Layers] heatmapType: ${densityScoringType}, Ligands: ${data.ligand?.length || 0}, Receptors: ${data.receptor?.length || 0}`);
 
-    // Use a more generic name to hold either ScreenGrid, Hexagon or Heatmap layer
     let aggregationLayer: ScreenGridLayer<Point> | HeatmapLayer<Point> | HexagonLayer<Point> | null = null;
-
-    // Configuration for layers
     const gridCellSizePixels = 20; 
-    const hexagonRadius = 15;      // Radius for HexagonLayer
-    const hexagonCoverage = 0.9;   // Coverage for HexagonLayer (0-1)
-    const heatmapRadiusPixels = 40; 
-    const heatmapIntensity = 1;    
-    const heatmapThreshold = 0.05; 
+    const hexagonRadius = 15;     
+    const hexagonCoverage = 0.9;  
+    const heatmapRadiusPixels = 40;
+    const heatmapIntensity = 1;   
+    const heatmapThreshold = 0.05;
 
-    // 1. Determine data source for aggregation based on Density Scoring
     let layerData: Point[] | null = null;
     let layerIdPrefix = '';
     if (densityScoringType === 'Ligand') {
@@ -160,13 +152,12 @@ const Visualization: React.FC<VisualizationProps> = ({ data, ligandName, recepto
         layerIdPrefix = 'receptor';
     }
 
-    // 2. Create the selected aggregation layer if scoring is enabled
-    if (layerData && layerData.length > 0) { // Check if layerData is not null and has points
+    if (layerData && layerData.length > 0) { 
       const commonProps = {
           data: layerData,
           getPosition: (d: Point) => [d.x, d.y] as [number, number],
           getWeight: 1,
-          pickable: false, // Aggregation layers usually aren't pickable
+          pickable: false,
       };
       const colorRange = densityScoringType === 'Receptor' ? [
           [237, 248, 251, 0],
@@ -194,7 +185,7 @@ const Visualization: React.FC<VisualizationProps> = ({ data, ligandName, recepto
             ];
 
       if (aggregationLayerType === 'ScreenGrid') {
-          console.log(`[Visualization Layers] Creating ${layerIdPrefix} ScreenGridLayer`);
+          console.log(`[InteractionVisualization Layers] Creating ${layerIdPrefix} ScreenGridLayer`);
           aggregationLayer = new ScreenGridLayer<Point>({ 
             ...commonProps,
             id: `${layerIdPrefix}-screengrid-layer`, 
@@ -204,18 +195,16 @@ const Visualization: React.FC<VisualizationProps> = ({ data, ligandName, recepto
             aggregation: 'SUM' 
           });
       } else if (aggregationLayerType === 'Hexagon') {
-          console.log(`[Visualization Layers] Creating ${layerIdPrefix} HexagonLayer`);
+          console.log(`[InteractionVisualization Layers] Creating ${layerIdPrefix} HexagonLayer`);
           aggregationLayer = new HexagonLayer<Point>({
               ...commonProps,
               id: `${layerIdPrefix}-hexagon-layer`,
               radius: hexagonRadius,
               coverage: hexagonCoverage,
               colorRange: colorRange as Color[],
-              // extruded: false, // Default
-              // elevationScale: 1, // Default
           });
-      } else { // aggregationLayerType === 'Heatmap'
-          console.log(`[Visualization Layers] Creating ${layerIdPrefix} HeatmapLayer`);
+      } else {
+          console.log(`[InteractionVisualization Layers] Creating ${layerIdPrefix} HeatmapLayer`);
           aggregationLayer = new HeatmapLayer<Point>({
             ...commonProps,
             id: `${layerIdPrefix}-heatmap-layer`,
@@ -228,46 +217,41 @@ const Visualization: React.FC<VisualizationProps> = ({ data, ligandName, recepto
       }
     }
 
-    // 3. Determine which scatter plot layers to show based on Points Display
     const scatterLayersToShow = [];
     if (pointsDisplayType === 'ligands' || pointsDisplayType === 'both') {
-        if (data.ligand.length > 0) scatterLayersToShow.push(baseLayers[0]); // Ligand layer
+        if (data.ligand.length > 0) scatterLayersToShow.push(baseLayers[0]);
     }
     if (pointsDisplayType === 'receptors' || pointsDisplayType === 'both') {
-        if (data.receptor.length > 0) scatterLayersToShow.push(baseLayers[1]); // Receptor layer
+        if (data.receptor.length > 0) scatterLayersToShow.push(baseLayers[1]);
     }
 
-    // 4. Combine aggregation and scatter plot layers
     const finalLayers = [];
     if (aggregationLayer) {
-      finalLayers.push(aggregationLayer); // Add aggregation layer first (render underneath)
+      finalLayers.push(aggregationLayer);
     }
-    finalLayers.push(...scatterLayersToShow); // Add scatter layers on top
+    finalLayers.push(...scatterLayersToShow);
 
-    console.log('[Visualization Layers] Final layers array:', finalLayers.map(l => l?.id)); // Log layer IDs
+    console.log('[InteractionVisualization Layers] Final layers array:', finalLayers.map(l => l?.id));
 
     return finalLayers;
 
-  }, [data.ligand, data.receptor, densityScoringType, pointsDisplayType, aggregationLayerType]); // Dependencies for useMemo
+  }, [data.ligand, data.receptor, densityScoringType, pointsDisplayType, aggregationLayerType]);
 
   const toggleFullscreen = () => {
     setIsFullscreen(!isFullscreen);
-    // Note: DeckGL might need a resize notification after container size changes
-    // This often happens automatically, but keep in mind if issues persist.
   };
 
-  // --- Add onError handler for DeckGL ---
   const onDeckError = useCallback((error: Error) => console.error('[DeckGL Error]', error), []);
 
   return (
-    <div className={`${styles.visualizationContainer} ${isFullscreen ? styles.fullscreen : ''}`}>
+    <div className={`${styles.interactionVisualizationContainer} ${isFullscreen ? styles.fullscreen : ''}`}>
       <div className={styles.deckGlWrapper}>
         <DeckGL
           views={new OrthographicView({id: 'ortho-view'})}
           viewState={viewState}
           onViewStateChange={onViewStateChange}
           controller={true}
-          onError={onDeckError} // Added onError prop
+          onError={onDeckError}
           layers={layers}
           getTooltip={({object}) => object && `Point: (${object.x.toFixed(2)}, ${object.y.toFixed(2)})`}
           style={{ width: '100%', height: '100%', position: 'relative' }}
@@ -286,9 +270,7 @@ const Visualization: React.FC<VisualizationProps> = ({ data, ligandName, recepto
                     {isFullscreen ? "✕" : "⛶"}
                 </button>
             </div>
-            {/* --- Updated Legend Area --- */}
             <div className={styles.legendContainer}>
-                {/* Scatterplot Legend (maybe hide if points are off?) */}
                 {(pointsDisplayType === 'ligands' || pointsDisplayType === 'both') && (
                     <div className={styles.legendItem}>
                         <div className={styles.legendColor} style={{ backgroundColor: 'red' }} />
@@ -301,8 +283,6 @@ const Visualization: React.FC<VisualizationProps> = ({ data, ligandName, recepto
                         <span>{receptorName}</span>
                     </div>
                 )}
-
-                {/* --- Density Scoring Selector --- */}
                 <div className={styles.controlGroup}>
                     <span className={styles.controlLabel}>Density Scoring:</span>
                     <label>
@@ -318,9 +298,7 @@ const Visualization: React.FC<VisualizationProps> = ({ data, ligandName, recepto
                         Receptor Density
                     </label>
                 </div>
-
-                {/* --- Aggregation Type Selector --- */}
-                <div className={styles.controlGroup} > {/* Disable if scoring is Off */} 
+                <div className={styles.controlGroup} >
                      <span className={styles.controlLabel}>Density Style:</span>
                     <label>
                         <input type="radio" name="aggType" value="ScreenGrid" checked={aggregationLayerType === 'ScreenGrid'} onChange={() => setAggregationLayerType('ScreenGrid')} disabled={densityScoringType === 'Off'} />
@@ -335,8 +313,6 @@ const Visualization: React.FC<VisualizationProps> = ({ data, ligandName, recepto
                         Heatmap
                     </label>
                 </div>
-
-                 {/* --- Points Display Selector --- */}
                 <div className={styles.controlGroup}>
                     <span className={styles.controlLabel}>Points:</span>
                     <label>
@@ -363,4 +339,4 @@ const Visualization: React.FC<VisualizationProps> = ({ data, ligandName, recepto
   );
 };
 
-export default Visualization; 
+export default InteractionVisualization; 

@@ -1,7 +1,8 @@
 import React from 'react';
 import styles from './ScopeSelector.module.css';
 
-type ScopeType = 'whole_tissue' | 'layers';
+// Export the type
+export type ScopeType = 'whole_tissue' | 'layers' | 'custom';
 
 interface ScopeSelectorProps {
   selectedScope: ScopeType;
@@ -37,6 +38,17 @@ const ScopeSelector: React.FC<ScopeSelectorProps> = ({
             className={styles.radioInput}
           />
           Layers
+        </label>
+        <label className={styles.optionLabel}>
+          <input
+            type="radio"
+            name="scope"
+            value="custom"
+            checked={selectedScope === 'custom'}
+            onChange={() => onScopeChange('custom')}
+            className={styles.radioInput}
+          />
+          Custom Selection
         </label>
       </div>
     </div>

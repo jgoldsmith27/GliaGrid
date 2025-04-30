@@ -1,0 +1,129 @@
+/* Styles for SpatialOverviewVisualization */
+
+.spatialOverviewContainer {
+  position: relative;
+  width: 100%;
+  border: 1px solid #e2e8f0; /* Cool Gray 200 */
+  border-radius: 8px; 
+  overflow: hidden;
+  background: white;
+  display: flex; 
+  flex-direction: column;
+  height: 550px; /* Match InteractionVisualization height for now */
+}
+
+.spatialOverviewContainer.fullscreen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 1000; /* Ensure it covers everything */
+  border-radius: 0;
+  border: none;
+}
+
+
+.deckGlWrapper {
+  position: relative; 
+  width: 100%;
+  flex-grow: 1; 
+}
+
+/* Controls Overlay - Reuse or adapt styles from InteractionVisualization */
+.deckOverlayControls {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background-color: rgba(255, 255, 255, 0.9);
+    padding: 12px;
+    border-radius: 6px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    max-width: 280px;
+    max-height: calc(100% - 20px); /* Limit height */
+    overflow-y: auto; /* Allow scrolling if needed */
+}
+
+.deckButtons {
+    display: flex;
+    justify-content: space-between; /* Space out zoom and fullscreen */
+    align-items: center;
+}
+
+.zoomControls {
+    display: flex;
+    gap: 5px;
+}
+
+.zoomControls button, 
+.fullscreenButton {
+    background-color: #fff;
+    border: 1px solid #cbd5e1; /* Cool Gray 300 */
+    color: #334155; /* Cool Gray 700 */
+    padding: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 1.2em;
+    line-height: 26px; /* Center icon vertically */
+    text-align: center;
+    transition: background-color 0.2s, border-color 0.2s;
+}
+
+.zoomControls button:hover, 
+.fullscreenButton:hover {
+    background-color: #f1f5f9; /* Cool Gray 100 */
+    border-color: #94a3b8; /* Cool Gray 400 */
+}
+
+/* Layer Legend Specific Styles */
+.layerLegendContainer {
+    border-top: 1px solid #e2e8f0; /* Separator */
+    padding-top: 10px;
+}
+
+.layerLegendContainer h4 {
+    margin: 0 0 10px 0;
+    font-size: 0.9em;
+    font-weight: 600;
+    color: #475569; /* Cool Gray 600 */
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.layerLegendItem {
+    margin-bottom: 6px;
+}
+
+.layerToggleLabel {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    font-size: 0.9em;
+    color: #334155; /* Cool Gray 700 */
+}
+
+.layerToggleCheckbox {
+    margin-right: 8px;
+    accent-color: #3b82f6; /* Blue 500 */
+    cursor: pointer;
+}
+
+.legendColorSwatch {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    margin-right: 8px;
+    border: 1px solid rgba(0,0,0,0.1);
+}
+
+.layerNameText {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis; /* Prevent long names from breaking layout */
+} 
