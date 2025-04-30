@@ -5,10 +5,7 @@ import numpy as np
 from typing import Dict, Any, List, Set
 from sklearn.preprocessing import MinMaxScaler # For pathway dominance normalization
 import time # For placeholder simulation - REMOVE if not needed
-import logging # ADD logging import
 
-# --- Setup Logger ---
-logger = logging.getLogger(__name__) # ADD logger instance
 
 # --- Helper Functions --- 
 
@@ -26,7 +23,7 @@ def _split_receptor_complex(receptor_name: str) -> List[str]:
 
 def _calculate_lr_counts_for_scope(spatial_df_subset: pd.DataFrame, interactions_df: pd.DataFrame) -> Dict[str, int]:
     """Calculates unique ligand/receptor counts for a given spatial data subset."""
-    logger.debug(f"    Calculating counts for scope with {len(spatial_df_subset)} spots...")
+    print(f"    Calculating counts for scope with {len(spatial_df_subset)} spots...")
     
     present_genes = _get_present_genes(spatial_df_subset)
     if not present_genes:
@@ -56,42 +53,38 @@ def _calculate_lr_counts_for_scope(spatial_df_subset: pd.DataFrame, interactions
 
 def run_stage1_counts_pipeline(spatial_df: pd.DataFrame, interactions_df: pd.DataFrame) -> Dict[str, Dict[str, int]]:
     """Runs the LR count calculation for whole tissue and each layer."""
-    logger.info("Running Stage 1 Counts Pipeline...")
+    print("Running Stage 1 Counts Pipeline...")
     results = {}
     # Ensure 'layer' column exists and handle potential non-string layer names gracefully
     if 'layer' not in spatial_df.columns:
-        logger.error("'layer' column not found in spatial data.")
+        print("ERROR: 'layer' column not found in spatial data.")
         return {'whole_tissue': _calculate_lr_counts_for_scope(spatial_df, interactions_df)} # Calculate for whole tissue only
         
     try:
         # Attempt to convert layer names to string to ensure consistency
         layers = list(spatial_df['layer'].astype(str).unique())
     except Exception as e:
-        logger.error(f"Error converting layer names to string: {e}. Proceeding with original layer types.")
+        print(f"ERROR converting layer names to string: {e}. Proceeding with original layer types.")
         layers = list(spatial_df['layer'].unique())
         
     scopes = ['whole_tissue'] + layers
 
     for scope in scopes:
-        logger.info(f"  Processing Counts scope: {scope}")
-        try:
-            if scope == 'whole_tissue':
-                subset_df = spatial_df
-            else:
-                # Filter using the potentially converted scope name
-                subset_df = spatial_df[spatial_df['layer'] == scope] 
-            
-            if subset_df.empty:
-                logger.warning(f"    Skipping empty scope: {scope}")
-                results[str(scope)] = {"unique_ligands": 0, "unique_receptors": 0}
-                continue
-            
-            results[str(scope)] = _calculate_lr_counts_for_scope(subset_df, interactions_df)
-        except Exception as e:
-            logger.exception(f"    ERROR processing counts for scope {scope}: {e}")
-            results[str(scope)] = {"unique_ligands": -1, "unique_receptors": -1} # Indicate error
+        print(f"  Processing scope: {scope}")
+        if scope == 'whole_tissue':
+            subset_df = spatial_df
+        else:
+            # Filter using the potentially converted scope name
+            subset_df = spatial_df[spatial_df['layer'] == scope] 
         
-    logger.info("Stage 1 Counts Pipeline Complete.")
+        if subset_df.empty:
+            print(f"    Skipping empty scope: {scope}")
+            results[str(scope)] = {"unique_ligands": 0, "unique_receptors": 0}
+            continue
+            
+        results[str(scope)] = _calculate_lr_counts_for_scope(subset_df, interactions_df)
+        
+    print("Stage 1 Counts Pipeline Complete.")
     return results
 
 # --- Stage 2a: Pathway Dominance --- 
@@ -104,7 +97,7 @@ def _calculate_pathway_dominance_for_scope(spatial_df_subset: pd.DataFrame, inte
     4. Normalizes expression proxy using MinMaxScaler.
     5. Scores possible interactions based on normalized expression.
     """
-    logger.debug(f"    Calculating pathway dominance for scope with {len(spatial_df_subset)} spots...")
+    print(f"    Calculating pathway dominance for scope with {len(spatial_df_subset)} spots...")
     
     if spatial_df_subset.empty or 'gene' not in spatial_df_subset.columns:
         return []
@@ -122,7 +115,7 @@ def _calculate_pathway_dominance_for_scope(spatial_df_subset: pd.DataFrame, inte
     present_receptor_components = present_genes.intersection(all_receptor_components_in_db)
     
     if not present_ligands or not present_receptor_components:
-        logger.warning("    Skipping pathway dominance: No ligands or receptor components present in scope.")
+        print("    Skipping pathway dominance: No ligands or receptor components present in scope.")
         return []
 
     # 2. Filter interactions_df to possible interactions within the scope
@@ -132,9 +125,9 @@ def _calculate_pathway_dominance_for_scope(spatial_df_subset: pd.DataFrame, inte
     ].copy() # Create a copy to avoid SettingWithCopyWarning
 
     if possible_interactions.empty:
-        logger.warning("    Skipping pathway dominance: No possible interactions found for present L/R.")
+        print("    Skipping pathway dominance: No possible interactions found for present L/R.")
         return []
-    logger.debug(f"    Found {len(possible_interactions)} possible interactions for the scope.")
+    print(f"    Found {len(possible_interactions)} possible interactions for the scope.")
 
     # 3. Calculate relative frequency for *all* present genes (ligands and receptors)
     gene_counts = spatial_df_subset['gene'].value_counts()
@@ -149,7 +142,7 @@ def _calculate_pathway_dominance_for_scope(spatial_df_subset: pd.DataFrame, inte
 
     # 4. Normalize expression proxy (0-1 scale) for relevant genes
     if not gene_expression:
-         logger.warning("    Skipping pathway dominance: No relevant genes found for expression calculation.")
+         print("    Skipping pathway dominance: No relevant genes found for expression calculation.")
          return [] 
          
     expression_genes = list(gene_expression.keys())
@@ -209,44 +202,40 @@ def _calculate_pathway_dominance_for_scope(spatial_df_subset: pd.DataFrame, inte
     pairs_df = pd.DataFrame(scored_pairs)
     pairs_df = pairs_df.sort_values('score', ascending=False)
     
-    logger.debug(f"    Scored {len(pairs_df)} interactions for the scope.")
+    print(f"    Scored {len(pairs_df)} interactions for the scope.")
     return pairs_df.to_dict('records')
 
 def run_pathway_dominance_pipeline(spatial_df: pd.DataFrame, interactions_df: pd.DataFrame) -> Dict[str, List[Dict[str, Any]]]:
     """Runs the pathway dominance calculation for whole tissue and each layer."""
-    logger.info("Running Pathway Dominance Pipeline...")
+    print("Running Pathway Dominance Pipeline...")
     results = {}
     if 'layer' not in spatial_df.columns:
-        logger.error("'layer' column not found in spatial data.")
+        print("ERROR: 'layer' column not found in spatial data.")
         return {'whole_tissue': _calculate_pathway_dominance_for_scope(spatial_df, interactions_df)}
         
     try:
         layers = list(spatial_df['layer'].astype(str).unique())
     except Exception as e:
-        logger.error(f"Error converting layer names to string: {e}. Proceeding with original layer types.")
+        print(f"ERROR converting layer names to string: {e}. Proceeding with original layer types.")
         layers = list(spatial_df['layer'].unique())
         
     scopes = ['whole_tissue'] + layers
 
     for scope in scopes:
-        logger.info(f"  Processing Pathway Dominance scope: {scope}")
-        try:
-            if scope == 'whole_tissue':
-                subset_df = spatial_df
-            else:
-                subset_df = spatial_df[spatial_df['layer'] == scope]
-            
-            if subset_df.empty:
-                logger.warning(f"    Skipping empty scope: {scope}")
-                results[str(scope)] = []
-                continue
-            
-            results[str(scope)] = _calculate_pathway_dominance_for_scope(subset_df, interactions_df)
-        except Exception as e:
-            logger.exception(f"    ERROR processing pathway dominance for scope {scope}: {e}")
-            results[str(scope)] = [] # Return empty list on error for this scope
+        print(f"  Processing scope: {scope}")
+        if scope == 'whole_tissue':
+            subset_df = spatial_df
+        else:
+            subset_df = spatial_df[spatial_df['layer'] == scope]
         
-    logger.info("Pathway Dominance Pipeline Complete.")
+        if subset_df.empty:
+            print(f"    Skipping empty scope: {scope}")
+            results[str(scope)] = []
+            continue
+            
+        results[str(scope)] = _calculate_pathway_dominance_for_scope(subset_df, interactions_df)
+        
+    print("Pathway Dominance Pipeline Complete.")
     return results
 
 # --- Stage 2b: Module Context --- 
@@ -255,10 +244,10 @@ def _calculate_module_context_for_scope(modules_df: pd.DataFrame, pathway_result
     """Calculates module context for significant pairs in a given spatial data subset.
     Assumes pathway_results_subset is a list of dicts with 'ligand' and 'receptor' keys.
     """
-    logger.debug("    Calculating module context for scope...")
+    print(f"    Calculating module context for scope...") # No subset needed here directly
 
     if not pathway_results_subset or modules_df.empty or 'gene' not in modules_df.columns or 'module' not in modules_df.columns:
-        logger.warning("    Skipping module context: Missing pathway results or invalid modules data.")
+        print("    Skipping module context: Missing pathway results or invalid modules data.")
         return []
         
     # Create module lookup for faster access (gene -> module)
@@ -267,7 +256,7 @@ def _calculate_module_context_for_scope(modules_df: pd.DataFrame, pathway_result
          modules_df['gene'] = modules_df['gene'].astype(str)
          module_lookup = modules_df.set_index('gene')['module'].to_dict()
     except Exception as e:
-        logger.error(f"ERROR creating module lookup: {e}. Check modules file columns ('gene', 'module').")
+        print(f"ERROR creating module lookup: {e}. Check modules file columns ('gene', 'module').")
         return []
 
     module_context_results = []
@@ -321,10 +310,10 @@ def _calculate_module_context_for_scope(modules_df: pd.DataFrame, pathway_result
 
 def run_module_context_pipeline(spatial_df: pd.DataFrame, interactions_df: pd.DataFrame, modules_df: pd.DataFrame, full_pathway_results: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List[Dict[str, Any]]]:
     """Runs the module context calculation for whole tissue and each layer."""
-    logger.info("Running Module Context Pipeline...")
+    print("Running Module Context Pipeline...")
     results = {}
     if 'layer' not in spatial_df.columns:
-        logger.error("'layer' column not found in spatial data. Cannot run module context per layer.")
+        print("ERROR: 'layer' column not found in spatial data. Cannot run module context per layer.")
         # Calculate only for whole tissue if pathway results exist
         pathway_subset = full_pathway_results.get('whole_tissue', [])
         return {'whole_tissue': _calculate_module_context_for_scope(modules_df, pathway_subset)} 
@@ -332,30 +321,26 @@ def run_module_context_pipeline(spatial_df: pd.DataFrame, interactions_df: pd.Da
     try:
         layers = list(spatial_df['layer'].astype(str).unique())
     except Exception as e:
-        logger.error(f"Error converting layer names to string: {e}. Proceeding with original layer types.")
+        print(f"ERROR converting layer names to string: {e}. Proceeding with original layer types.")
         layers = list(spatial_df['layer'].unique())
 
     scopes = ['whole_tissue'] + layers
 
     for scope in scopes:
-        logger.info(f"  Processing Module Context scope: {scope}")
-        try:
-            # Get the relevant pathway results for this scope
-            pathway_subset = full_pathway_results.get(str(scope), []) # Use str(scope) for lookup
-            
-            # Module context calculation doesn't directly need the spatial subset,
-            # only the pathway results for the scope and the global modules_df.
-            if not pathway_subset:
-                 logger.warning(f"    Skipping empty/missing pathway results for scope: {scope}")
-                 results[str(scope)] = []
-                 continue
-                 
-            results[str(scope)] = _calculate_module_context_for_scope(modules_df, pathway_subset)
-        except Exception as e:
-            logger.exception(f"    ERROR processing module context for scope {scope}: {e}")
-            results[str(scope)] = [] # Return empty list on error for this scope
+        print(f"  Processing scope: {scope}")
+        # Get the relevant pathway results for this scope
+        pathway_subset = full_pathway_results.get(str(scope), []) # Use str(scope) for lookup
         
-    logger.info("Module Context Pipeline Complete.")
+        # Module context calculation doesn't directly need the spatial subset,
+        # only the pathway results for the scope and the global modules_df.
+        if not pathway_subset:
+             print(f"    Skipping empty/missing pathway results for scope: {scope}")
+             results[str(scope)] = []
+             continue
+             
+        results[str(scope)] = _calculate_module_context_for_scope(modules_df, pathway_subset)
+        
+    print("Module Context Pipeline Complete.")
     return results 
 
 
@@ -367,7 +352,7 @@ async def run_analysis_pipeline_from_dataframes(
     modules_df: pd.DataFrame
 ) -> Dict[str, Dict[str, Any]]:
     """Runs the analysis pipeline stages directly on provided DataFrames for a custom scope."""
-    logger.info("Running Analysis Pipeline from DataFrames (Custom Selection)...")
+    print("Running Analysis Pipeline from DataFrames (Custom Selection)...")
     scope_name = "custom_selection" # Define the scope name for results
     final_results = {scope_name: {}}
 
@@ -376,30 +361,29 @@ async def run_analysis_pipeline_from_dataframes(
 
     try:
         # 1. Calculate Counts
-        logger.info(f"  Calculating counts for {scope_name}...")
+        print(f"  Calculating counts for {scope_name}...")
         count_results = _calculate_lr_counts_for_scope(all_spatial_df, interactions_df)
         final_results[scope_name]['ligand_receptor_counts'] = count_results
-        logger.info(f"  Counts complete for {scope_name}.")
+        print(f"  Counts complete for {scope_name}.")
 
         # 2. Calculate Pathway Dominance
-        logger.info(f"  Calculating pathway dominance for {scope_name}...")
+        print(f"  Calculating pathway dominance for {scope_name}...")
         pathway_results_list = _calculate_pathway_dominance_for_scope(all_spatial_df, interactions_df)
         final_results[scope_name]['pathway_dominance'] = pathway_results_list
-        logger.info(f"  Pathway dominance complete for {scope_name}.")
+        print(f"  Pathway dominance complete for {scope_name}.")
 
         # 3. Calculate Module Context
-        logger.info(f"  Calculating module context for {scope_name}...")
+        print(f"  Calculating module context for {scope_name}...")
         # Pass the pathway results calculated for this specific scope
         module_context_list = _calculate_module_context_for_scope(modules_df, pathway_results_list)
         final_results[scope_name]['module_context'] = module_context_list
-        logger.info(f"  Module context complete for {scope_name}.")
+        print(f"  Module context complete for {scope_name}.")
 
-        logger.info(f"Analysis Pipeline from DataFrames Complete for {scope_name}.")
+        print(f"Analysis Pipeline from DataFrames Complete for {scope_name}.")
         return final_results
 
     except Exception as e:
-        # Log the specific error from the pipeline stage
-        logger.exception(f"ERROR during analysis pipeline from DataFrames for {scope_name}: {e}")
+        print(f"ERROR during analysis pipeline from DataFrames: {e}")
         # Re-raise the exception so the service layer can catch it and update job status
         raise e 
 

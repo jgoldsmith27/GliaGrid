@@ -284,25 +284,29 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
       <div className={styles.controlArea}>
         <h3>Scope & Settings</h3>
         <div className={styles.controlGroup}>
-           <label className={styles.controlLabel}>Analysis Scope:</label>
+           {/* Remove this label */}
+           {/* <label className={styles.controlLabel}>Analysis Scope:</label> */}
             <ScopeSelector 
                 selectedScope={selectedScope} 
                 onScopeChange={handleScopeChange} 
             />
         </div>
+        
+        {/* Conditionally render the Layer Selector container */} 
         {selectedScope === 'layers' && (
-            <div className={styles.controlGroup}>
-            <label className={styles.controlLabel}>Select Layer:</label>
-            <LayerSelector 
-                availableLayers={availableLayers} 
-                selectedLayers={selectedLayers} 
-                onLayersChange={handleLayersChange} 
-            />
-             {selectedLayers.length > 1 && (
-                 <p className={styles.warning}>Warning: Multiple layers selected, analysis uses only the first ({selectedLayers[0]}).</p>
-             )}
+            <div className={styles.layerSelectorContainer}> {/* Wrapper Div */} 
+                <LayerSelector 
+                    availableLayers={availableLayers} 
+                    selectedLayers={selectedLayers} 
+                    onLayersChange={handleLayersChange} 
+                />
+                {/* Keep warning inside the container if relevant */} 
+                {selectedLayers.length > 1 && (
+                    <p className={styles.warning}>Warning: Multiple layers selected, analysis uses only the first ({selectedLayers[0]}).</p>
+                )}
             </div>
         )}
+        
          {/* Add other filters/settings here later */}
       </div>
 

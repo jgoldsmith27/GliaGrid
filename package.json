@@ -27,6 +27,7 @@
     "@deck.gl/layers": "^9.1.11",
     "@deck.gl/react": "^9.1.11",
     "node-fetch": "^2.7.0",
-    "papaparse": "^5.5.2"
+    "papaparse": "^5.5.2",
+    "robust-point-in-polygon": "^1.0.3"
   }
 }

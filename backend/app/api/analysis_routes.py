@@ -5,11 +5,24 @@ import asyncio
 import uuid
 import json
 import logging
+import pandas as pd # Import pandas for DataFrame creation
 
 # Import JobService and AnalysisService
 from app.services.job_service import JobService, get_job_service
-from app.services.analysis_service import AnalysisService 
-from app.models.analysis_models import AnalysisMapping, AnalysisPayload # Import models
+# Only import the class, not the non-existent dependency function from the service file
+from app.services.analysis_service import AnalysisService
+# Import models from the correct location
+from app.models.analysis_models import AnalysisMapping, AnalysisPayload, PointData, CustomAnalysisRequest
+
+# Assuming core analysis logic is importable
+# from ..analysis_logic.core import run_analysis_pipeline # Placeholder - core logic needs adaptation
+
+# REMOVING unused imports that were causing ModuleNotFoundError
+# from ..utils.task_manager import TaskManager, TaskStatus 
+# from ..utils.file_manager import FileManager, get_file_manager, get_task_manager
+
+# REMOVING import from non-existent data_models module
+# from .data_models import AnalysisRequest, FileMapping, JobStatusResponse, AnalysisResult # Assuming existing data_models
 
 logger = logging.getLogger(__name__)
 
@@ -60,11 +73,46 @@ class ConnectionManager:
                 del self.active_connections[job_id]
 
     async def send_update(self, job_id: str, message: dict):
+        """Sends an update message to all clients connected for a specific job_id."""
         if job_id in self.active_connections:
-            # Create a task for each send operation to run them concurrently
-            tasks = [conn.send_text(json.dumps(message)) for conn in self.active_connections[job_id]]
-            await asyncio.gather(*tasks)
-            # print(f"Sent update to {len(tasks)} connections for job {job_id}") # Optional: verbose logging
+            message_str = None
+            try:
+                # Attempt to serialize the message to JSON
+                message_str = json.dumps(message) 
+            except TypeError as e:
+                # If serialization fails (e.g., non-serializable objects in results)
+                logger.error(f"[Job {job_id}] Failed to serialize message for WebSocket: {e}")
+                # Attempt to send a simplified error message instead
+                try:
+                    error_payload = {
+                        "status": message.get("status", "error"), # Preserve status if possible
+                        "message": f"Internal error: Could not serialize results for job {job_id}",
+                        "progress": message.get("progress"), # Preserve progress if possible
+                        "job_id": job_id,
+                        "results": None # Explicitly nullify results
+                    }
+                    message_str = json.dumps(error_payload)
+                    logger.info(f"[Job {job_id}] Sending simplified error status via WebSocket.")
+                except Exception as inner_e:
+                    # If even the simplified message fails (unlikely)
+                    logger.error(f"[Job {job_id}] Failed to serialize even the simplified error message: {inner_e}")
+                    # Cannot send update if basic serialization fails
+                    return 
+            except Exception as e:
+                # Catch other potential errors during serialization
+                logger.error(f"[Job {job_id}] Unexpected error during WebSocket message serialization: {e}")
+                return # Don't proceed if serialization failed
+
+            # Proceed only if serialization was successful (message_str is not None)
+            if message_str:
+                # Create a task for each send operation to run them concurrently
+                tasks = [conn.send_text(message_str) for conn in self.active_connections[job_id]]
+                try:
+                    await asyncio.gather(*tasks)
+                    # logger.debug(f"Sent update to {len(tasks)} connections for job {job_id}") # Keep debug logging optional
+                except Exception as send_e:
+                    # Log errors during the actual sending process
+                    logger.error(f"[Job {job_id}] Error sending WebSocket message to one or more clients: {send_e}")
 
 manager = ConnectionManager()
 # Pass the manager instance to the AnalysisService or make it accessible
@@ -189,3 +237,58 @@ async def websocket_status_endpoint(
     except Exception as e:
         manager.disconnect(websocket, job_id)
         logger.exception(f"Error in WebSocket connection for job {job_id}: {e}") 
+
+# --- NEW Models for Custom Analysis ---
+# REMOVED PointData and CustomAnalysisRequest CLASS DEFINITIONS FROM HERE
+
+# --- NEW Endpoint for Custom Analysis ---
+@router.post("/start/custom_selection", response_model=JobStatusResponse, status_code=202) 
+async def start_custom_selection_analysis(
+    # Reorder parameters: non-defaults first
+    background_tasks: BackgroundTasks,
+    request: CustomAnalysisRequest = Body(...),
+    job_service: JobService = Depends(get_job_service),
+    analysis_service: AnalysisService = Depends(get_analysis_service)
+):
+    """
+    Starts a background analysis task using a custom-defined set of points 
+    (e.g., from a user's lasso selection).
+    """
+    # Create a job ID using JobService (provides central tracking)
+    # Pass the request payload as initial context for reference if needed later
+    job_id = job_service.create_job(initial_context=request.dict())
+    logger.info(f"Received custom selection analysis request. Assigning Job ID: {job_id}")
+    
+    if not request.ligands or not request.receptors:
+        logger.error(f"Custom analysis request for job {job_id} missing ligand or receptor points.")
+        # Update job status to failed
+        asyncio.create_task(job_service.update_job_status(job_id, status='failed', message="Ligand and receptor point lists cannot be empty."))
+        raise HTTPException(status_code=400, detail="Ligand and receptor point lists cannot be empty.")
+
+    # --- Delegate to AnalysisService --- 
+    # Add a new method to AnalysisService to handle this specific workflow.
+    # This service method will be responsible for: 
+    #   - Creating DataFrames from the point lists.
+    #   - Handling column naming/validation.
+    #   - Loading necessary auxiliary data (interactions, modules - requires thought on how to locate these).
+    #   - Calling an adapted version of the core analysis logic.
+    #   - Updating job status via JobService.
+    
+    # *** TODO: Implement `run_custom_analysis_background` in `AnalysisService` ***
+    background_tasks.add_task(analysis_service.run_custom_analysis_background, job_id, request)
+
+    # Initial status update via JobService
+    initial_status_message = "Custom selection analysis job accepted."
+    asyncio.create_task(job_service.update_job_status(
+        job_id,
+        status="pending",
+        message=initial_status_message,
+        progress=0.0
+    ))
+    
+    # Return immediate response
+    return JobStatusResponse(
+        job_id=job_id,
+        status="pending",
+        message=initial_status_message
+    ) 

@@ -6,11 +6,17 @@ from fastapi import HTTPException, Depends
 import time # For simulating work
 from typing import Dict, Any
 import logging # Import logging
+import asyncio
 
 # Import the new JobService and its dependency function
 from app.services.job_service import JobService, get_job_service
 from app.services.file_service import FileService
-from app.models.analysis_models import AnalysisPayload, AnalysisMapping # Use the new models file
+# Import models from the models file
+from app.models.analysis_models import AnalysisPayload, AnalysisMapping, CustomAnalysisRequest, PointData
+
+# REMOVED OLD IMPORT: from ..api.analysis_routes import CustomAnalysisRequest, PointData 
+# Assume settings are available for standard file paths
+from ..core.config import settings 
 
 # Get a logger instance
 logger = logging.getLogger(__name__)
@@ -122,6 +128,7 @@ class AnalysisService:
             status_update = {"status": "running", "message": "Loading data...", "progress": 0.1}
             self.job_service.update_job_status(job_id, **status_update)
             await self.manager.send_update(job_id, {**self.job_service.get_job_status(job_id), "job_id": job_id})
+            logger.info(f"[Job {job_id}] Status: Running, Progress: 10% (Loading data...)")
 
             # 1. Get file paths and load/standardize data
             # Retrieve payload from context
@@ -140,6 +147,7 @@ class AnalysisService:
             status_update = {"message": "Standardizing data...", "progress": 0.2}
             self.job_service.update_job_status(job_id, **status_update)
             await self.manager.send_update(job_id, {**self.job_service.get_job_status(job_id), "job_id": job_id})
+            logger.info(f"[Job {job_id}] Status: Running, Progress: 20% (Standardizing data...)")
             
             spatial_df = self._load_and_standardize(spatial_path, spatial_mapping, STANDARDIZED_SPATIAL_COLS)
             interactions_df = self._load_and_standardize(interactions_path, interactions_mapping, STANDARDIZED_INTERACTION_COLS)
@@ -150,6 +158,7 @@ class AnalysisService:
             status_update = {"message": "Calculating ligand/receptor counts...", "progress": 0.4}
             self.job_service.update_job_status(job_id, **status_update)
             await self.manager.send_update(job_id, {**self.job_service.get_job_status(job_id), "job_id": job_id})
+            logger.info(f"[Job {job_id}] Status: Running, Progress: 40% (Calculating counts...)")
             
             logger.info(f"Job {job_id}: Running Stage 1 Counts...")
             count_results = run_stage1_counts_pipeline(spatial_df, interactions_df)
@@ -162,6 +171,7 @@ class AnalysisService:
             status_update = {"progress": 0.5}
             self.job_service.update_job_status(job_id, **status_update)
             await self.manager.send_update(job_id, {**self.job_service.get_job_status(job_id), "job_id": job_id})
+            logger.info(f"[Job {job_id}] Status: Running, Progress: 50%")
 
             # 3. Run Stage 2 (Concurrent - simulated sequentially here)
 
@@ -169,6 +179,7 @@ class AnalysisService:
             status_update = {"message": "Calculating pathway dominance...", "progress": 0.6}
             self.job_service.update_job_status(job_id, **status_update)
             await self.manager.send_update(job_id, {**self.job_service.get_job_status(job_id), "job_id": job_id})
+            logger.info(f"[Job {job_id}] Status: Running, Progress: 60% (Calculating pathway dominance...)")
             
             logger.info(f"Job {job_id}: Running Pathway Dominance...")
             pathway_results = run_pathway_dominance_pipeline(spatial_df, interactions_df)
@@ -180,12 +191,12 @@ class AnalysisService:
             status_update = {"progress": 0.8}
             self.job_service.update_job_status(job_id, **status_update)
             await self.manager.send_update(job_id, {**self.job_service.get_job_status(job_id), "job_id": job_id})
+            logger.info(f"[Job {job_id}] Status: Running, Progress: 80%")
 
             # 3b. Module Context
             status_update = {"message": "Calculating module context...", "progress": 0.85}
             self.job_service.update_job_status(job_id, **status_update)
             await self.manager.send_update(job_id, {**self.job_service.get_job_status(job_id), "job_id": job_id})
-            
             logger.info(f"Job {job_id}: Running Module Context...")
             # Module context might depend on pathway results (e.g., significant pairs)
             # Pass pathway_results if needed by the actual function
@@ -204,7 +215,7 @@ class AnalysisService:
             }
             self.job_service.update_job_status(job_id, **status_update)
             await self.manager.send_update(job_id, {**self.job_service.get_job_status(job_id), "job_id": job_id})
-            logger.info(f"Job {job_id}: Analysis complete. Final status sent via WebSocket.")
+            logger.info(f"[Job {job_id}] Status: Success, Progress: 100% (Analysis complete)")
 
         except HTTPException as e:
             # Handle exceptions raised during loading/standardization or analysis
@@ -213,6 +224,7 @@ class AnalysisService:
             status_update = {"status": "failed", "message": error_message}
             self.job_service.update_job_status(job_id, **status_update)
             await self.manager.send_update(job_id, {**self.job_service.get_job_status(job_id), "job_id": job_id})
+            logger.info(f"[Job {job_id}] Status: Failed")
         except Exception as e:
             # Catch any other unexpected errors
             error_message = f"An unexpected error occurred during analysis: {str(e)}"
@@ -220,11 +232,131 @@ class AnalysisService:
             status_update = {"status": "failed", "message": error_message}
             self.job_service.update_job_status(job_id, **status_update)
             await self.manager.send_update(job_id, {**self.job_service.get_job_status(job_id), "job_id": job_id})
+            logger.info(f"[Job {job_id}] Status: Failed (Unexpected Error)")
         finally:
             # Cleanup logic remains the same for now
             # TODO: Implement delayed or on-demand cleanup
             pass
 
+    # --- NEW Method for Custom Selection Analysis --- 
+    async def run_custom_analysis_background(self, job_id: str, request: CustomAnalysisRequest):
+        """Runs analysis on custom point selections in the background."""
+        logger.info(f"Custom analysis background task started for job ID: {job_id}")
+        final_results = {}
+        try:
+            # 0. Update status to running
+            await self._update_job_status_async(job_id, status="running", message="Preparing custom data...", progress=0.1)
+            logger.info(f"[Job {job_id}] Custom Status: Running, Progress: 10% (Preparing data...)")
+
+            # 1. Create DataFrames from request points
+            logger.info(f"[Job {job_id}] Creating DataFrames from custom points...")
+            try: 
+                ligands_df = pd.DataFrame([p.dict() for p in request.ligands])
+                ligands_df['layer'] = 'custom_selection' 
+                # Ensure required columns exist after potential rename if needed
+                # Example: Rename 'gene' to 'geneID' if analysis logic expects 'geneID'
+                if 'gene' in ligands_df.columns and 'geneID' not in ligands_df.columns:
+                    ligands_df.rename(columns={'gene': 'geneID'}, inplace=True)
+                if not all(col in ligands_df.columns for col in ['geneID', 'x', 'y', 'layer']):
+                    raise ValueError("Ligand DataFrame missing required columns (geneID, x, y, layer) after creation.")
+                
+                receptors_df = pd.DataFrame([p.dict() for p in request.receptors])
+                receptors_df['layer'] = 'custom_selection'
+                if 'gene' in receptors_df.columns and 'geneID' not in receptors_df.columns:
+                    receptors_df.rename(columns={'gene': 'geneID'}, inplace=True)
+                if not all(col in receptors_df.columns for col in ['geneID', 'x', 'y', 'layer']):
+                    raise ValueError("Receptor DataFrame missing required columns (geneID, x, y, layer) after creation.")
+                    
+                # Combine ligand and receptor data into a single spatial DataFrame
+                # Add a 'type' column to distinguish them if necessary for analysis logic
+                ligands_df['type'] = 'ligand'
+                receptors_df['type'] = 'receptor'
+                # Ensure required columns are present before concat
+                # This assumes analysis pipeline expects a single spatial df
+                all_spatial_df = pd.concat([ligands_df, receptors_df], ignore_index=True)
+                logger.info(f"[Job {job_id}] Combined spatial DataFrame created with {len(all_spatial_df)} total points.")
+                
+            except Exception as df_error:
+                logger.exception(f"[Job {job_id}] Failed to create DataFrames from custom points: {df_error}")
+                raise HTTPException(status_code=400, detail=f"Invalid point data provided: {df_error}")
+
+            # 2. Load Standard Interaction and Module Data
+            # *** ASSUMPTION: Using standard files defined in settings ***
+            await self._update_job_status_async(job_id, message="Loading standard interaction/module data...", progress=0.2)
+            logger.info(f"[Job {job_id}] Custom Status: Running, Progress: 20% (Loading standard files...)")
+            try:
+                interactions_path = settings.SHARED_DATA_DIR / settings.INTERACTIONS_FILENAME
+                modules_path = settings.SHARED_DATA_DIR / settings.MODULES_FILENAME
+                
+                # Load directly, assuming standard column names (ligand, receptor for interactions; gene, module for modules)
+                interactions_df = pd.read_csv(interactions_path) 
+                # Validate required interaction columns
+                if not all(col in interactions_df.columns for col in ['ligand', 'receptor']):
+                     raise ValueError(f"Interactions file missing required columns: ligand, receptor")
+                     
+                modules_df = pd.read_csv(modules_path)
+                # Validate required module columns
+                if not all(col in modules_df.columns for col in ['gene', 'module']):
+                     raise ValueError(f"Modules file missing required columns: gene, module")
+                     
+                logger.info(f"[Job {job_id}] Standard interactions ({len(interactions_df)}) and modules ({len(modules_df)}) loaded.")
+            except Exception as file_error:
+                 logger.exception(f"[Job {job_id}] Failed to load standard interactions/modules files: {file_error}")
+                 raise HTTPException(status_code=500, detail=f"Failed to load standard analysis files: {file_error}")
+
+            # 3. Call Adapted Analysis Pipeline
+            # *** TODO: Implement run_analysis_pipeline_from_dataframes in analysis_logic.core ***
+            await self._update_job_status_async(job_id, message="Running custom analysis pipeline...", progress=0.4)
+            logger.info(f"[Job {job_id}] Custom Status: Running, Progress: 40% (Running pipeline...)")
+            from ..analysis_logic.core import run_analysis_pipeline_from_dataframes # Import here or at top
+            
+            logger.info(f"[Job {job_id}] Calling adapted analysis pipeline...")
+            # This function needs to return results structured similarly to the original pipeline 
+            # (e.g., dict with scope 'custom_selection' containing analysis results)
+            # --- SIMULATE PROGRESS DURING PIPELINE ---
+            await asyncio.sleep(1) # Simulate work
+            await self._update_job_status_async(job_id, progress=0.6)
+            logger.info(f"[Job {job_id}] Custom Status: Running, Progress: 60%")
+            await asyncio.sleep(1) # Simulate more work
+            await self._update_job_status_async(job_id, progress=0.8)
+            logger.info(f"[Job {job_id}] Custom Status: Running, Progress: 80%")
+            # --- END SIMULATION ---
+            
+            pipeline_results = await run_analysis_pipeline_from_dataframes(
+                all_spatial_df=all_spatial_df, 
+                interactions_df=interactions_df, 
+                modules_df=modules_df
+            )
+            final_results = pipeline_results # Assuming the function returns the final structured dict
+            logger.info(f"[Job {job_id}] Adapted analysis pipeline complete.")
+            
+            # 4. Update status to success
+            await self._update_job_status_async(
+                job_id, 
+                status="success", 
+                message="Custom selection analysis complete.", 
+                progress=1.0, 
+                results=final_results
+            )
+            logger.info(f"[Job {job_id}] Custom Status: Success, Progress: 100% (Analysis complete)")
+
+        except HTTPException as e:
+            error_message = f"Error during custom analysis: {e.detail}"
+            logger.error(f"Job {job_id}: Custom Failed with HTTPException - {error_message}")
+            await self._update_job_status_async(job_id, status="failed", message=error_message)
+            logger.info(f"[Job {job_id}] Custom Status: Failed")
+        except Exception as e:
+            error_message = f"An unexpected error occurred during custom analysis: {str(e)}"
+            logger.exception(f"Job {job_id}: Custom Failed with Exception - {error_message}")
+            await self._update_job_status_async(job_id, status="failed", message=error_message)
+            logger.info(f"[Job {job_id}] Custom Status: Failed (Unexpected Error)")
+
+    # Helper to update status and notify via WebSocket (if manager exists)
+    async def _update_job_status_async(self, job_id: str, **kwargs):
+        self.job_service.update_job_status(job_id, **kwargs)
+        if self.manager:
+            await self.manager.send_update(job_id, {**self.job_service.get_job_status(job_id), "job_id": job_id})
+            
     def _load_and_standardize(self, file_path: Path, mapping: AnalysisMapping, standard_cols_map: Dict[str, str]) -> pd.DataFrame:
         """Loads data from CSV or H5AD and standardizes columns based on mapping."""
         file_ext = file_path.suffix.lower()

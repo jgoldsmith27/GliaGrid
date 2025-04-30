@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 # Import all necessary routers
 from .api import visualization # <<< RE-ENABLED IMPORT
-from .api import file_routes, analysis_routes
+from .api import file_routes, analysis_routes # <<< Add spatial_data_routes
 
 
 # --- DEBUG: Check if router object exists after import ---
@@ -36,8 +36,19 @@ app.include_router(analysis_routes.router, prefix="/api", tags=["Analysis"]) # <
 app.include_router(analysis_routes.ws_router, tags=["Analysis WebSocket"])
 # Include visualization routes (already present, but good to confirm)
 app.include_router(visualization.router, prefix="/api", tags=["Visualization"]) # <<< RE-ENABLED ROUTER
-# Include the new spatial visualization router
+# Remove spatial data router inclusion
+# app.include_router(spatial_data_routes.router, prefix="/api", tags=["Spatial Data"])
 # app.include_router(density_maps.router, prefix="/api", tags=["Spatial Visualization"])
+
+# --- REMOVE DEBUG: Print registered routes before starting --- 
+# for route in app.routes:
+#     if hasattr(route, "path"):
+#         print(f"Registered Route: Path={route.path}, Name={route.name}, Methods={getattr(route, 'methods', 'N/A')}")
+#     elif hasattr(route, "path_format"):
+#         # Handle WebSocket routes
+#         print(f"Registered WS Route: Path={route.path_format}")
+# print("--- Finished listing routes ---", flush=True)
+# ------------------------------------------------------
 
 @app.get("/")
 async def root():

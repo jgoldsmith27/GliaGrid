@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Dict, Optional, List
 
 # Pydantic model for the mapping part of the payload
 class AnalysisMapping(BaseModel):
@@ -18,4 +18,17 @@ class AnalysisPayload(BaseModel):
     interactionsFileId: str = Field(..., description="Unique ID of the uploaded interactions data file")
     interactionsMapping: AnalysisMapping = Field(..., description="Column mappings for the interactions data")
     modulesFileId: str = Field(..., description="Unique ID of the uploaded modules data file")
-    modulesMapping: AnalysisMapping = Field(..., description="Column mappings for the modules data") 
+    modulesMapping: AnalysisMapping = Field(..., description="Column mappings for the modules data")
+
+# --- Models moved from analysis_routes.py ---
+class PointData(BaseModel):
+    x: float
+    y: float
+    gene: str
+    # layer: Optional[str] = None # Layer might not be relevant from lasso
+
+class CustomAnalysisRequest(BaseModel):
+    ligands: List[PointData]
+    receptors: List[PointData]
+    # Potentially add original jobId if needed to access other files like interactions/modules?
+    # original_job_id: Optional[str] = None 
