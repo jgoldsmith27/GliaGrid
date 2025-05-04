@@ -23,12 +23,14 @@ interface UseInteractionDataReturn {
  * @param jobId The ID of the analysis job.
  * @param selectedPair The currently selected [ligand, receptor] pair. Null if none selected.
  * @param apiScopeName The specific scope name for the API ('whole_tissue' or a layer name like 'Layer1'). 'custom' is handled separately (no fetch).
+ * @param lassoCoords Lasso coordinates for polygon filtering
  * @returns State variables for data, loading, error, warnings, and control functions.
  */
 const useInteractionData = (
     jobId: string | null, 
     selectedPair: [string, string] | null, 
-    apiScopeName: string | null // e.g., 'whole_tissue', 'Layer1', 'custom'
+    apiScopeName: string | null, // e.g., 'whole_tissue', 'Layer1', 'custom'
+    lassoCoords: [number, number][] | null // ADDED: Lasso coordinates for polygon filtering
 ): UseInteractionDataReturn => {
     const [interactionVizData, setInteractionVizData] = useState<InteractionVisualizationData | null>(null);
     const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -49,13 +51,12 @@ const useInteractionData = (
     }, []);
 
     const fetchInteractionData = useCallback(async () => {
-        // Guard conditions: Don't fetch if no job, no pair, or scope is 'custom'
-        if (!jobId || !selectedPair || !apiScopeName || apiScopeName === 'custom') {
+        // Guard conditions: Don't fetch if no job or no pair selected.
+        if (!jobId || !selectedPair) {
             setInteractionVizData(null);
             setError(null);
             setWarnings([]);
-            setIsLoading(false);
-             // If a fetch was in progress for a previous valid state, cancel it
+            // If a fetch was in progress for a previous valid state, cancel it
             if (abortControllerRef.current) {
                  cancelFetch();
             }
@@ -83,11 +84,15 @@ const useInteractionData = (
             const options: DataRequestOptions = {
                 ligand,
                 receptor,
-                layer: apiScopeName,
+                layer: apiScopeName ?? undefined, // Pass undefined if apiScopeName is null
+                polygon: lassoCoords, // ADDED: Pass lasso coordinates
             };
             
             // Create a URL for logging purposes only
-            const logUrl = `Using SharedDataStore for: ${jobId}?ligand=${encodeURIComponent(ligand)}&receptor=${encodeURIComponent(receptor)}&layer=${encodeURIComponent(apiScopeName)}`;
+            // MODIFIED: Log layer/polygon info better
+            const scopeInfo = apiScopeName ? `layer=${encodeURIComponent(apiScopeName)}` : 'scope=unknown';
+            const polygonInfo = lassoCoords ? `polygon=present` : 'polygon=absent';
+            const logUrl = `Using SharedDataStore for: ${jobId}?ligand=${encodeURIComponent(ligand)}&receptor=${encodeURIComponent(receptor)}&${scopeInfo}&${polygonInfo}`;
             console.log("[useInteractionData] Fetching:", logUrl);
 
             // Track abort controller state
@@ -152,7 +157,7 @@ const useInteractionData = (
                  setIsLoading(false);
             }
         }
-    }, [jobId, selectedPair, apiScopeName, cancelFetch, dataStore]); // Added dataStore as dependency
+    }, [jobId, selectedPair, apiScopeName, lassoCoords, cancelFetch, dataStore]); // Added lassoCoords and dataStore dependencies
 
     // Effect to trigger fetch when dependencies change
     useEffect(() => {

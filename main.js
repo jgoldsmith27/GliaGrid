@@ -5,6 +5,9 @@ const fsPromises = require('fs').promises;
 const Papa = require('papaparse'); // Added for CSV parsing
 const zmq = require('zeromq'); // Restored for ZeroMQ IPC
 const readline = require('readline'); // Added for line-by-line reading
+const { spawn } = require('child_process');
+const os = require('os');
+const chokidar = require('chokidar');
 
 // --- Cancellation Tracking for File Reads ---
 const activeReadRequests = new Map(); // Map<requestId, isCancelled>
@@ -242,6 +245,28 @@ ipcMain.on('cancel-read-request', (event, requestId) => {
   }
 });
 
+// Simple Point-in-Polygon check using the Ray Casting algorithm
+// Copied from https://stackoverflow.com/a/2922778
+// Adapated for [x, y] coordinates
+function isPointInPolygon(point, vs) {
+    // ray-casting algorithm based on
+    // https://wrf.ecse.rpi.edu/Research/Short_Notes/pnpoly.html/pnpoly.html
+    
+    var x = point[0], y = point[1];
+    
+    var inside = false;
+    for (var i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+        var xi = vs[i][0], yi = vs[i][1];
+        var xj = vs[j][0], yj = vs[j][1];
+        
+        var intersect = ((yi > y) != (yj > y))
+            && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+        if (intersect) inside = !inside;
+    }
+    
+    return inside;
+};
+
 ipcMain.handle('read-backend-file', async (event, fileId, options = {}, requestId) => {
   // Check if a requestId was provided (should be from preload)
   if (!requestId) {
@@ -277,8 +302,9 @@ ipcMain.handle('read-backend-file', async (event, fileId, options = {}, requestI
     // Handle different file types
     const ext = path.extname(filePath).toLowerCase();
     if (ext === '.csv') {
-      // Read and parse CSV, passing the cancellation checker
-      return await readCsvChunked(filePath, options, isCancelled);
+      // Read and parse CSV, passing the cancellation checker and polygon
+      // MODIFIED: Pass options.polygon to readCsvChunked
+      return await readCsvChunked(filePath, options, isCancelled, options.polygon);
     } else if (ext === '.h5ad') {
       // For H5AD, we might need to use Python through child_process
       // Cancellation for child_process would need specific handling (e.g., process.kill)
@@ -302,8 +328,16 @@ ipcMain.handle('read-backend-file', async (event, fileId, options = {}, requestI
 });
 
 // --- Helper function for reading CSV with filtering and cancellation ---
-async function readCsvChunked(filePath, options = {}, isCancelled) {
+// MODIFIED: Added polygon parameter
+async function readCsvChunked(filePath, options = {}, isCancelled, polygon) {
   console.log(`[main.js] readCsvChunked called for ${filePath} with options:`, options);
+  // Log if polygon filtering is active
+  if (polygon && polygon.length > 0) {
+    console.log(`[main.js] Applying polygon filter with ${polygon.length} vertices.`);
+  } else {
+    console.log(`[main.js] No polygon filter applied.`);
+  }
+
   const { filter, columns } = options; // Destructure options
   const data = [];
   const warnings = [];
@@ -322,6 +356,8 @@ async function readCsvChunked(filePath, options = {}, isCancelled) {
     let headerProcessed = false;
     let filterColIndex = -1;
     let columnIndices = [];
+    let xColIndex = -1; // ADDED: Index for X coordinate
+    let yColIndex = -1; // ADDED: Index for Y coordinate
 
     lineReader.on('line', (line) => {
       // *** Check for cancellation frequently ***
@@ -353,9 +389,41 @@ async function readCsvChunked(filePath, options = {}, isCancelled) {
             }
             return index;
           }).filter(index => index !== -1); // Only keep valid indices
+
+          // ADDED: Find X and Y column indices if polygon filter is active
+          if (polygon && polygon.length > 0) {
+              // Infer X/Y columns from requested columns (assuming they are named 'x', 'y' or similar)
+              // NOTE: This assumes the frontend passes the correct column names mapped in SharedDataStore
+              const xColName = options.xCol; // Get the expected column name from options (needs to be passed!)
+              const yColName = options.yCol; // Get the expected column name from options (needs to be passed!)
+              if (!xColName || !yColName) {
+                  warnings.push(`Polygon filter active, but X/Y column names (xCol, yCol) not provided in options.`);
+              } else {
+                  xColIndex = headers.indexOf(xColName);
+                  yColIndex = headers.indexOf(yColName);
+                  if (xColIndex === -1) warnings.push(`Polygon filter: X column "${xColName}" not found.`);
+                  if (yColIndex === -1) warnings.push(`Polygon filter: Y column "${yColName}" not found.`);
+                  // Check if X/Y columns are actually included in the requested columns
+                  if (!columnIndices.includes(xColIndex)) warnings.push(`Polygon filter: X column "${xColName}" requested but not found in 'columns' list.`);
+                  if (!columnIndices.includes(yColIndex)) warnings.push(`Polygon filter: Y column "${yColName}" requested but not found in 'columns' list.`);
+              }
+          }
         } else {
           // If no specific columns requested, use all columns
           columnIndices = headers.map((_, index) => index);
+          // ADDED: Find X/Y column indices if polygon filter is active even if no columns specified
+          if (polygon && polygon.length > 0) {
+              const xColName = options.xCol;
+              const yColName = options.yCol;
+              if (!xColName || !yColName) {
+                   warnings.push(`Polygon filter active, but X/Y column names (xCol, yCol) not provided in options.`);
+              } else {
+                  xColIndex = headers.indexOf(xColName);
+                  yColIndex = headers.indexOf(yColName);
+                  if (xColIndex === -1) warnings.push(`Polygon filter: X column "${xColName}" not found.`);
+                  if (yColIndex === -1) warnings.push(`Polygon filter: Y column "${yColName}" not found.`);
+              }
+          }
         }
         return; // Skip processing header row as data
       }
@@ -369,6 +437,22 @@ async function readCsvChunked(filePath, options = {}, isCancelled) {
         if (!filter.values.includes(cellValue)) {
           return; // Skip row if it doesn't match filter
         }
+      }
+
+      // ADDED: Apply polygon filter if active and valid
+      if (polygon && polygon.length >= 3 && xColIndex !== -1 && yColIndex !== -1) {
+          const x = parseFloat(values[xColIndex]);
+          const y = parseFloat(values[yColIndex]);
+
+          if (isNaN(x) || isNaN(y)) {
+              // Optional: Warn about invalid coordinates in a row
+              // warnings.push(`Skipping row due to invalid coordinates for polygon check: ${line}`);
+              return; // Skip row with invalid coordinates
+          }
+
+          if (!isPointInPolygon([x, y], polygon)) {
+              return; // Skip row if point is outside polygon
+          }
       }
 
       // Construct row object with requested columns

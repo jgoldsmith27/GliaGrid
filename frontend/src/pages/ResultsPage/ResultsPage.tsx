@@ -382,6 +382,7 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
                                 // ADDED: Pass aggregation state and setter
                                 customAggregationLevel={customAggregationLevel}
                                 setCustomAggregationLevel={setCustomAggregationLevel}
+                                lassoCoords={lassoCoords} // ADDED: Pass lassoCoords
                             />
                       ) : (
                           // Initial state before analysis is run
@@ -409,6 +410,7 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
                         // ADDED: Pass aggregation state and setter (even if null/default)
                         customAggregationLevel={customAggregationLevel} 
                         setCustomAggregationLevel={setCustomAggregationLevel}
+                        lassoCoords={null} // ADDED: Pass null lassoCoords for non-custom scopes
                     />
               </div>
           )}

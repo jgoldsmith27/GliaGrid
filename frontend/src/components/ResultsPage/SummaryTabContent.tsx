@@ -35,7 +35,8 @@ interface SummaryTabContentProps {
   customAnalysisError?: string | null;
   // ADDED: Props for aggregation level state (lifted up)
   customAggregationLevel: CustomAggregationLevel;
-  setCustomAggregationLevel: React.Dispatch<React.SetStateAction<CustomAggregationLevel>>;
+  setCustomAggregationLevel: (level: CustomAggregationLevel) => void;
+  lassoCoords: [number, number][] | null; // ADDED: Lasso coordinates prop
 }
 
 // Define columns for the combined table
@@ -72,6 +73,7 @@ const SummaryTabContent: React.FC<SummaryTabContentProps> = ({
   // ADDED: Destructure new props
   customAggregationLevel,
   setCustomAggregationLevel,
+  lassoCoords, // ADDED: Destructure lassoCoords prop
 }) => {
   // REMOVED: Internal state for custom aggregation level
   // const [customAggregationLevel, setCustomAggregationLevel] = useState<CustomAggregationLevel>('whole_custom');
@@ -86,9 +88,19 @@ const SummaryTabContent: React.FC<SummaryTabContentProps> = ({
 
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null); // For highlighting table row
   
-  // Use the custom hook for interaction data (non-custom scopes)
-  const { interactionVizData, isLoading: isLoadingInteractionViz, error: interactionVizError, warnings: interactionVizWarnings, cancelFetch: cancelInteractionVizFetch } = 
-    useInteractionData(jobId, selectedPair, currentScope !== 'custom' ? apiScopeName : null); 
+  // Use the custom hook for interaction data
+  const { 
+    interactionVizData, 
+    isLoading: isLoadingInteractionViz, 
+    error: interactionVizError, 
+    warnings: interactionVizWarnings, 
+    cancelFetch: cancelInteractionVizFetch 
+  } = useInteractionData(
+        jobId, 
+        selectedPair, 
+        apiScopeName, // Pass the apiScopeName (can be null, layer, whole_tissue, custom)
+        lassoCoords // Pass the lassoCoords prop directly
+    );
 
   // Effect to fetch data based on currentScope (REMOVED fetchAllPoints call)
   useEffect(() => {
@@ -138,9 +150,9 @@ const SummaryTabContent: React.FC<SummaryTabContentProps> = ({
         if (customAnalysisResults) {
 
             // Use the interaction hook for custom results visualization
-            // NOTE: This re-uses the hook; ensure dependencies are correct
+            // MODIFIED: Pass lassoCoords here too
             const { interactionVizData: customVizData, isLoading: isLoadingCustomViz, error: customVizError, cancelFetch: cancelCustomVizFetch } =
-                useInteractionData(jobId, selectedPair, null);
+                useInteractionData(jobId, selectedPair, apiScopeName, lassoCoords);
 
             // --- Extract data based on aggregation level from the bundle --- 
             const layeredData = customAnalysisResults.layered_results || {};

@@ -22,6 +22,7 @@ export interface DataRequestOptions {
   layer?: string; // For layer-specific filtering in handleRequest
   ligand?: string; // For interaction points
   receptor?: string; // For interaction points
+  polygon?: [number, number][]; // ADDED: Optional polygon for spatial filtering
   signal?: AbortSignal; // Add signal to options
 }
 
@@ -344,14 +345,24 @@ export class SharedDataStore {
             throw new Error('Electron API function readBackendFile is not available.');
         }
         
-        // *** Pass the signal to the backend API ***
-        const spatialDataResult = await window.electronAPI.readBackendFile(spatialFileId, {
+        // *** Pass the signal and polygon to the backend API ***
+        const backendOptions = {
            filter: {
                column: mapping.geneCol,
                values: genesToFetch 
            },
-           columns: columnsToFetch 
-        }, signal); // Pass signal as the third argument (assuming API supports it)
+           columns: columnsToFetch,
+           polygon: options.polygon, // ADDED: Pass polygon
+           xCol: mapping.xCol, // ADDED: Pass X column name
+           yCol: mapping.yCol  // ADDED: Pass Y column name
+        };
+        console.log("[SharedDataStore] Calling readBackendFile with options:", backendOptions);
+
+        const spatialDataResult = await window.electronAPI.readBackendFile(
+            spatialFileId, 
+            backendOptions, // Pass constructed options
+            signal // Pass signal as the third argument
+        );
         
         // Check if aborted immediately after the potentially long operation
         if (signal?.aborted) throw new DOMException('Request aborted', 'AbortError');
