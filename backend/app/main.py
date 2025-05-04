@@ -9,7 +9,7 @@ from .api import file_routes, analysis_routes # Removed visualization import
 import logging # <<< ADDED logging import
 
 # <<< ADDED Basic logging configuration >>>
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 app = FastAPI(
     title="GliaGrid API",

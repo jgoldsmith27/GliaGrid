@@ -472,13 +472,31 @@ class AnalysisService:
             
             # Convert DataFrame to GeoDataFrame
             try:
-                geometry = [Point(xy) for xy in zip(spatial_df['x'], spatial_df['y'])]
-                spatial_gdf = gpd.GeoDataFrame(spatial_df, geometry=geometry)
+                # OPTIMIZATION: Use efficient points_from_xy to create geometry
+                gdf_creation_start_time = time.time() # DEBUG
+                spatial_gdf = gpd.GeoDataFrame(
+                    spatial_df, geometry=gpd.points_from_xy(spatial_df.x, spatial_df.y)
+                )
+                logger.debug(f"[Custom Analysis {original_job_id}] GeoDataFrame creation duration: {time.time() - gdf_creation_start_time:.4f} seconds.") # DEBUG
+                
+                # OPTIMIZATION: Create a spatial index
+                index_start_time = time.time() # DEBUG
+                spatial_gdf.sindex
+                logger.debug(f"[Custom Analysis {original_job_id}] Spatial index creation duration: {time.time() - index_start_time:.4f} seconds.") # DEBUG
+                
                 # Create Shapely Polygon from coordinates
                 lasso_polygon = Polygon(polygon_coords)
                 
-                # Perform spatial query
-                points_within_lasso = spatial_gdf[spatial_gdf.within(lasso_polygon)]
+                # OPTIMIZATION: Pre-filter using bounding box intersection
+                bbox_filter_start_time = time.time() # DEBUG
+                possible_matches_index = list(spatial_gdf.sindex.intersection(lasso_polygon.bounds))
+                possible_matches = spatial_gdf.iloc[possible_matches_index]
+                logger.debug(f"[Custom Analysis {original_job_id}] BBox pre-filter reduced points from {len(spatial_gdf)} to {len(possible_matches)}. Duration: {time.time() - bbox_filter_start_time:.4f} seconds.") # DEBUG
+                
+                # Perform precise spatial query only on the pre-filtered subset
+                precise_filter_start_time = time.time() # DEBUG
+                points_within_lasso = possible_matches[possible_matches.within(lasso_polygon)]
+                logger.debug(f"[Custom Analysis {original_job_id}] Precise filter duration: {time.time() - precise_filter_start_time:.4f} seconds.") # DEBUG
                 
                 # Drop the temporary geometry column if needed, keeping the filtered DataFrame
                 filtered_spatial_df = pd.DataFrame(points_within_lasso.drop(columns='geometry'))
