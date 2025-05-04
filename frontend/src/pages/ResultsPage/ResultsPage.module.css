@@ -10,10 +10,10 @@
 }
 
 .pageTitle {
-    margin: 0 0 24px 0; /* Adjusted margin */
-    color: #1f2937; /* Darker grey */
-    font-size: 1.8em; /* Slightly larger */
-    font-weight: 600;
+    margin-bottom: 24px !important; /* Ensure consistent spacing */
+    text-align: center; /* Center the title */
+    font-weight: 600 !important;
+    color: #334155; /* Cool Gray 700 */
 }
 
 /* Main layout using Flexbox */
@@ -118,4 +118,40 @@ progress::-moz-progress-bar {
     background-color: #fffbeb;
     border: 1px solid #fde68a;
     border-radius: 4px;
+}
+
+.resultsContainer {
+    padding: 24px;
+    max-width: 1600px; /* Increase max width for wider screens */
+    margin: 0 auto;
+    position: relative; /* Needed for absolute positioning of button */
+}
+
+.errorAlert {
+    margin-bottom: 16px;
+}
+
+/* Added styles for the back button */
+.backButtonContainer {
+    position: absolute;
+    top: 24px; /* Match container padding */
+    right: 24px; /* Match container padding */
+    z-index: 10; /* Ensure it's above other elements */
+}
+
+.backButton {
+    padding: 8px 16px;
+    background-color: #f1f5f9; /* Cool Gray 100 */
+    color: #334155; /* Cool Gray 700 */
+    border: 1px solid #cbd5e1; /* Cool Gray 300 */
+    border-radius: 6px;
+    font-size: 0.9em;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.2s, border-color 0.2s;
+}
+
+.backButton:hover {
+    background-color: #e2e8f0; /* Cool Gray 200 */
+    border-color: #94a3b8; /* Cool Gray 400 */
 } 

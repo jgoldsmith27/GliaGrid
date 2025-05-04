@@ -8,6 +8,7 @@ const readline = require('readline'); // Added for line-by-line reading
 const { spawn } = require('child_process');
 const os = require('os');
 const chokidar = require('chokidar');
+const fetch = require('node-fetch'); // <<< Added for making HTTP requests
 
 // --- Cancellation Tracking for File Reads ---
 const activeReadRequests = new Map(); // Map<requestId, isCancelled>
@@ -20,8 +21,7 @@ if (!fs.existsSync(projectsDir)) {
 const projectFileExtension = '.gliaproj';
 
 // --- Backend Integration Setup ---
-// Path to the backend's temporary uploads directory
-const backendTempDir = path.join(__dirname, 'backend', '.temp_uploads');
+const BACKEND_URL = 'http://127.0.0.1:8000'; // Define backend URL
 
 // Setup ZeroMQ subscriber for direct IPC
 const ZMQ_IPC_ADDRESS = "ipc:///tmp/gliagrid-job-status";
@@ -221,15 +221,75 @@ ipcMain.handle('load-project', async (event, filePath) => {
   }
 });
 
-// Handle deleting a specific project file
+// Handle deleting a specific project file AND associated backend files
 ipcMain.handle('delete-project', async (event, filePath, projectName) => {
+  console.log(`[main.js] Received request to delete project: ${projectName} (File: ${filePath})`);
+
+  let fileIdsToDelete = [];
+
+  // 1. Read the project file to get associated file IDs
+  try {
+    const content = await fsPromises.readFile(filePath, 'utf-8');
+    const projectData = JSON.parse(content);
+    if (projectData && projectData.files) {
+      // Collect all non-null/undefined file IDs
+      fileIdsToDelete = Object.values(projectData.files).filter(id => id != null);
+      console.log(`[main.js] Found file IDs associated with project ${projectName}:`, fileIdsToDelete);
+    } else {
+      console.warn(`[main.js] Project file ${filePath} did not contain a 'files' object.`);
+    }
+  } catch (error) {
+    // Log error but proceed to attempt deletion of .gliaproj file anyway
+    console.error(`[main.js] Error reading project file ${filePath} before deletion:`, error);
+    // Optionally, inform the user the file couldn't be read for cleanup?
+  }
+
+  // 2. Send DELETE requests to backend for each file ID
+  const deletePromises = fileIdsToDelete.map(fileId => {
+    const deleteUrl = `${BACKEND_URL}/api/files/${fileId}`;
+    console.log(`[main.js] Sending DELETE request to backend: ${deleteUrl}`);
+    return fetch(deleteUrl, { method: 'DELETE' })
+      .then(response => {
+        if (response.ok) {
+          console.log(`[main.js] Successfully deleted backend file ${fileId}`);
+          return { fileId, success: true };
+        } else if (response.status === 404) {
+           console.warn(`[main.js] Backend file ${fileId} not found (status 404). Already deleted?`);
+           return { fileId, success: true, warning: 'Not found' }; // Treat as success for overall operation
+        } else {
+          console.error(`[main.js] Failed to delete backend file ${fileId}. Status: ${response.status}`);
+          return response.text().then(text => {
+             console.error(`[main.js] Backend error response for ${fileId}: ${text}`)
+             return { fileId, success: false, error: `Backend status ${response.status}` };
+          });
+        }
+      })
+      .catch(error => {
+        console.error(`[main.js] Network error deleting backend file ${fileId}:`, error);
+        return { fileId, success: false, error: error.message };
+      });
+  });
+
+  // Wait for all backend deletions to attempt
+  const deleteResults = await Promise.allSettled(deletePromises);
+  const failedDeletions = deleteResults
+     .filter(result => result.status === 'fulfilled' && !result.value.success)
+     .map(result => result.value.fileId);
+
+  if (failedDeletions.length > 0) {
+     console.error('[main.js] Some backend files failed to delete:', failedDeletions);
+     // Decide if this should prevent .gliaproj deletion? For now, we'll proceed.
+     // Consider returning a more detailed error to the frontend.
+  }
+
+  // 3. Delete the local .gliaproj file
   try {
     await fsPromises.unlink(filePath);
     console.log(`[main.js] Deleted project file: ${filePath}`);
-    return { success: true };
+    return { success: true, backendErrors: failedDeletions.length > 0 ? failedDeletions : null };
   } catch (error) {
-    console.error(`[main.js] Failed to delete project ${filePath}:`, error);
-    return { success: false, error: `Failed to delete project: ${error.message}` };
+    console.error(`[main.js] Failed to delete project file ${filePath} after backend cleanup attempt:`, error);
+    return { success: false, error: `Failed to delete project file: ${error.message}` };
   }
 });
 

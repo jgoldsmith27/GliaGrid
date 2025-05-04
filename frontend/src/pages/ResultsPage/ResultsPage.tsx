@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useParams } from 'react-router-dom'; // Import useParams
+import { useParams, useNavigate } from 'react-router-dom'; // Import useParams and useNavigate
 import styles from './ResultsPage.module.css';
 import LoadingSpinner from '../../components/LoadingSpinner/LoadingSpinner';
 import SummaryTabContent from '../../components/ResultsPage/SummaryTabContent'; // New name
@@ -16,6 +16,7 @@ import SpatialOverviewVisualization from '../../components/SpatialOverviewVisual
 // ADDED: Import types/hooks needed for decoupled viz fetch
 import { SharedDataStore, useSharedData, DataRequestOptions } from '../../services/data/SharedDataStore';
 import { InteractionVisualizationData } from '../../hooks/useInteractionData'; // Assuming type is exported
+import { Tab, Tabs, Box, Typography, CircularProgress, Alert } from '@mui/material';
 
 // Define the structure for combined data used in tables/visualizations
 export interface CombinedInteractionData extends Partial<PathwayDominanceResult>, Partial<ModuleContextResult> {
@@ -35,7 +36,8 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
   // ADDED: State for custom aggregation level (lifted from SummaryTabContent)
   const [customAggregationLevel, setCustomAggregationLevel] = useState<CustomAggregationLevel>('whole_custom');
   
-  const { jobId } = useParams<{ jobId: string }>(); // Get jobId from URL
+  const { jobId } = useParams<{ jobId: string }>();
+  const navigate = useNavigate(); // Get navigate function
   
   // Use the event-driven hook to manage job status
   const { jobStatus, isLoading: isJobStatusLoading, error: jobStatusError, refreshStatus } = useJobStatus(jobId);
@@ -52,7 +54,7 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
   // } = useSpatialStreamData();
   
   // --- UI/Data State ---
-  // const [currentTab, setCurrentTab] = useState<ResultsTab>('Summary'); // Removed
+  const [currentTab, setCurrentTab] = useState(0);
   const [selectedScope, setSelectedScope] = useState<ScopeType>('whole_tissue');
   const [availableLayers, setAvailableLayers] = useState<string[]>([]);
   const [selectedLayer, setSelectedLayer] = useState<string | null>(null);
@@ -359,6 +361,14 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
     setDisplayedVizError(null);
   }, []);
 
+  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
+    setCurrentTab(newValue);
+  };
+
+  const handleBackClick = () => {
+    navigate('/'); // Navigate to the Data Input Page (assuming it's the root)
+  };
+
   // --- UI Rendering --- 
 
   // ADDED: Define table loading state
@@ -421,6 +431,13 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
   console.log("[ResultsPage] Passing onAnalyzeSelection:", typeof handleAnalyzeLasso); // LOGGING
   return (
     <div className={styles.resultsPageLayout}> {/* New overall layout class */} 
+      {/* Back Button Container - Added */}
+      <div className={styles.backButtonContainer}>
+        <button onClick={handleBackClick} className={styles.backButton}>
+          &larr; Back to Data Input
+        </button>
+      </div>
+      
       {/* Control Area */}
       <div className={styles.controlArea}>
         <h3>Scope & Settings</h3>
