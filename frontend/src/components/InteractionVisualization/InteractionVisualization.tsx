@@ -8,32 +8,140 @@ import { schemeCategory10 } from 'd3-scale-chromatic';
 import { Button, CircularProgress, Box } from '@mui/material';
 import styles from './InteractionVisualization.module.css';
 
-interface Point {
+// Interface for individual points from backend (now includes gene)
+interface PointWithGene {
+  x: number;
+  y: number;
+  gene: string; // Added gene property
+}
+
+// Interface for ligand points (doesn't need gene after processing)
+interface LigandPoint {
   x: number;
   y: number;
 }
 
-interface PointWithLayer extends Point {
-  layer: string;
+// Type for the data prop from SharedDataStore
+interface VisualizationData {
+  ligand: LigandPoint[]; // Processed ligand points
+  receptor: PointWithGene[]; // Raw receptor component points
+  isComplex: boolean;
+  receptorName: string; // Original receptor name (e.g., "R1_R2")
+  warnings?: string[];
 }
 
 type ScopeType = 'whole_tissue' | 'layers' | 'custom';
 
 interface InteractionVisualizationProps {
-  data: {
-    ligand: PointWithLayer[];
-    receptor: PointWithLayer[];
-  };
-  ligandName: string;
-  receptorName: string;
+  data: VisualizationData | null; // Updated data prop type, allow null initially
+  ligandName: string; // Keep ligandName for context
+  // receptorName is now derived from data prop
   currentScope: 'whole_tissue' | 'layers';
   isLoading: boolean;
   cancelFetch: () => void;
   layerBoundaries?: Record<string, [number, number][] | null>;
 }
 
-const getInitialViewState = (ligandData: PointWithLayer[], receptorData: PointWithLayer[]) => {
-    const allPoints = [...ligandData, ...receptorData];
+// --- Centroid Calculation Logic (Ported from Python) ---
+// Helper function to calculate distance squared
+function distanceSq(p1: { x: number; y: number }, p2: { x: number; y: number }): number {
+  const dx = p1.x - p2.x;
+  const dy = p1.y - p2.y;
+  return dx * dx + dy * dy;
+}
+
+// Calculates centroids for complex receptors
+function calculateComplexCentroids(
+  receptorComponentPoints: PointWithGene[],
+  receptorName: string,
+  proximityThresholdPixels: number = 100 // Default 100px = 50um
+): { x: number; y: number }[] {
+  if (!receptorName.includes('_') || receptorComponentPoints.length === 0) {
+    // Not complex or no points, return empty centroids
+    return [];
+  }
+
+  const components = receptorName.split('_');
+  const proximityThresholdSq = proximityThresholdPixels * proximityThresholdPixels;
+
+  // Separate points by component gene name
+  const componentData: Record<string, { x: number; y: number }[]> = {};
+  components.forEach(comp => componentData[comp] = []);
+  receptorComponentPoints.forEach(p => {
+    if (componentData[p.gene]) {
+      componentData[p.gene].push({ x: p.x, y: p.y });
+    }
+  });
+
+  // Check if all components are present
+  if (!components.every(comp => componentData[comp].length > 0)) {
+    console.warn(`[CentroidCalc] Cannot form complex ${receptorName}: component(s) missing points.`);
+    return [];
+  }
+
+  // Determine anchor component (fewest points)
+  let anchorComponentName: string | null = null;
+  let minCount = Infinity;
+  for (const comp of components) {
+    if (componentData[comp].length < minCount) {
+      minCount = componentData[comp].length;
+      anchorComponentName = comp;
+    }
+  }
+
+  if (!anchorComponentName) return []; // Should not happen if all components present
+
+  const anchorCoords = componentData[anchorComponentName];
+  const otherComponentNames = components.filter(c => c !== anchorComponentName);
+  const validCentroids: { x: number; y: number }[] = [];
+
+  console.log(`[CentroidCalc] Anchoring complex search on ${anchorComponentName} (${anchorCoords.length} points) for ${receptorName}`);
+
+  for (const anchorPoint of anchorCoords) {
+    const potentialClusterPoints: Record<string, { x: number; y: number }> = { [anchorComponentName]: anchorPoint };
+    let isPotentialClusterValid = true;
+
+    for (const otherCompName of otherComponentNames) {
+      const otherCoords = componentData[otherCompName];
+      let closestPoint: { x: number; y: number } | null = null;
+      let minDistanceSq = proximityThresholdSq;
+
+      for (const otherPoint of otherCoords) {
+        const dSq = distanceSq(anchorPoint, otherPoint);
+        if (dSq <= minDistanceSq) {
+          minDistanceSq = dSq;
+          closestPoint = otherPoint;
+        }
+      }
+
+      if (closestPoint) {
+        potentialClusterPoints[otherCompName] = closestPoint;
+      } else {
+        // If no point of this component is within threshold, invalidate this anchor
+        isPotentialClusterValid = false;
+        break;
+      }
+    }
+
+    if (isPotentialClusterValid) {
+      // Calculate centroid
+      const clusterPointsArray = Object.values(potentialClusterPoints);
+      let sumX = 0, sumY = 0;
+      clusterPointsArray.forEach(p => { sumX += p.x; sumY += p.y; });
+      const centroid = { x: sumX / clusterPointsArray.length, y: sumY / clusterPointsArray.length };
+      validCentroids.push(centroid);
+    }
+  }
+
+  console.log(`[CentroidCalc] Found ${validCentroids.length} potential complex centroids for ${receptorName}`);
+  return validCentroids;
+}
+// --- End Centroid Calculation Logic ---
+
+const getInitialViewState = (ligandData: LigandPoint[], receptorData: PointWithGene[], isComplex: boolean, complexCentroids: {x: number, y: number}[]) => {
+    // Use centroids for bounds if complex, otherwise use component points
+    const receptorPointsForBounds = isComplex ? complexCentroids : receptorData;
+    const allPoints = [...ligandData, ...receptorPointsForBounds];
     if (allPoints.length === 0) {
         return { target: [0, 0, 0] as [number, number, number], zoom: 1 };
     }
@@ -67,7 +175,7 @@ type DensityScoringType = 'Off' | 'Ligand' | 'Receptor';
 type AggregationLayerType = 'ScreenGrid' | 'Hexagon' | 'Heatmap';
 type PointsDisplayType = 'off' | 'ligands' | 'receptors' | 'both';
 
-const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ data, ligandName, receptorName, currentScope, isLoading, cancelFetch, layerBoundaries }) => {
+const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ data, ligandName, currentScope, isLoading, cancelFetch, layerBoundaries }) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [densityScoringType, setDensityScoringType] = useState<DensityScoringType>('Off'); 
   const [aggregationLayerType, setAggregationLayerType] = useState<AggregationLayerType>('ScreenGrid');
@@ -109,9 +217,10 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
 
   const initialViewState = useMemo(() => {
       console.log("[InteractionVisualization] Received data:", data);
+      if (!data) return { target: [0, 0, 0] as [number, number, number], zoom: 1 }; // Handle null data
       const ligandPts = data.ligand || [];
-      const receptorPts = data.receptor || [];
-      const state = getInitialViewState(ligandPts, receptorPts);
+      const receptorPts = data.receptor || []; // Raw component points
+      const state = getInitialViewState(ligandPts, receptorPts, data.isComplex, []);
       console.log("[InteractionVisualization] Calculated initialViewState:", state);
       return state;
   }, [data]);
@@ -147,9 +256,22 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
   }, []);
 
   const layers = useMemo(() => {
-    if (isLoading) return [];
+    // Check for null data or loading state AT THE START
+    if (!data || isLoading) {
+      return []; // Return empty if data is null or still loading
+    }
 
-    // --- ADDED: Create Boundary Polygon Layers --- 
+    // --- Type Guard: 'data' is now guaranteed non-null --- 
+
+    // Get receptor name from data 
+    const receptorName = data.receptorName;
+
+    // --- Calculate Centroids INSIDE this hook --- 
+    const complexCentroids = data.isComplex
+        ? calculateComplexCentroids(data.receptor, data.receptorName)
+        : []; // Calculate only if complex, otherwise empty
+
+    // --- Layer Boundary Logic (unchanged) --- 
     const boundaryLayers = layerBoundaries 
       ? Object.entries(layerBoundaries)
           // Filter for layers that are visible AND have non-null boundaries
@@ -176,35 +298,54 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
           .filter(layer => layer !== null) // Filter out nulls
       : []; // Empty array if no layerBoundaries prop
 
-    // --- Existing Scatterplot Layers (using original unfiltered data) ---
-    const baseLayers = [
-      new ScatterplotLayer<PointWithLayer>({
-        id: 'ligand-layer',
-        data: data.ligand || [], 
-        getPosition: (d) => [d.x, d.y],
-        getRadius: 5,
-        getFillColor: [255, 0, 0, 180],
-        pickable: true,
-        radiusScale: 5,
-        radiusMinPixels: 1,
-        radiusMaxPixels: 50,
-      }),
-      new ScatterplotLayer<PointWithLayer>({
-        id: 'receptor-layer',
-        data: data.receptor || [],
-        getPosition: (d) => [d.x, d.y],
-        getRadius: 5,
-        getFillColor: [0, 0, 255, 180],
-        pickable: true,
-        radiusScale: 5,
-        radiusMinPixels: 1,
-        radiusMaxPixels: 50,
-      }),
-    ];
+    // --- Determine Receptor Points to Plot --- 
+    // Use calculated centroids if complex, otherwise the original component points
+    const receptorPointsToPlot = data.isComplex ? complexCentroids : data.receptor;
 
-    console.log(`[InteractionVisualization Layers] heatmapType: ${densityScoringType}, Ligands: ${data.ligand?.length || 0}, Receptors: ${data.receptor?.length || 0}`);
+    console.log(`[InteractionVisualization] Plotting receptors for ${receptorName}. Complex: ${data.isComplex}. Plotting ${receptorPointsToPlot.length} points.`);
 
-    let aggregationLayer: ScreenGridLayer<PointWithLayer> | HeatmapLayer<PointWithLayer> | HexagonLayer<PointWithLayer> | null = null;
+    // --- Scatterplot Layers --- 
+    const baseLayers = [];
+
+    // Ligand Layer (always uses data.ligand)
+    if (pointsDisplayType === 'ligands' || pointsDisplayType === 'both') {
+        baseLayers.push(
+          new ScatterplotLayer<LigandPoint>({
+            id: 'ligand-layer',
+            data: data.ligand || [], // data is non-null here
+            getPosition: (d) => [d.x, d.y],
+            getRadius: 5,
+            getFillColor: [255, 0, 0, 180], // Red
+            pickable: true,
+            radiusScale: 5,
+            radiusMinPixels: 1,
+            radiusMaxPixels: 50,
+            visible: true, // Visibility controlled by inclusion in array
+          })
+        );
+    }
+
+    // Receptor Layer (uses centroids or original points)
+    if (pointsDisplayType === 'receptors' || pointsDisplayType === 'both') {
+        baseLayers.push(
+          new ScatterplotLayer<PointWithGene | { x: number; y: number }>({ // Type union for data
+            id: 'receptor-layer',
+            data: receptorPointsToPlot, // Use determined points
+            getPosition: (d) => [d.x, d.y],
+            getRadius: 5,
+            getFillColor: [0, 0, 255, 180], // Blue
+            pickable: true,
+            radiusScale: 5,
+            radiusMinPixels: 1,
+            radiusMaxPixels: 50,
+            visible: true, // Visibility controlled by inclusion in array
+          })
+        );
+    }
+
+    console.log(`[InteractionVisualization Layers] pointsDisplay: ${pointsDisplayType}, Aggregation: ${densityScoringType}, Ligands: ${data.ligand?.length || 0}, Receptor points plotted: ${receptorPointsToPlot.length}`);
+
+    let aggregationLayer: ScreenGridLayer<any> | HeatmapLayer<any> | HexagonLayer<any> | null = null;
     const gridCellSizePixels = 20; 
     const hexagonRadius = 15;     
     const hexagonCoverage = 0.9;  
@@ -212,20 +353,21 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
     const heatmapIntensity = 1;   
     const heatmapThreshold = 0.05;
 
-    let layerData: PointWithLayer[] | null = null;
+    let layerData: any[] | null = null;
     let layerIdPrefix = '';
     if (densityScoringType === 'Ligand') {
-        layerData = data.ligand || [];
+        layerData = data.ligand || []; // data is non-null here
         layerIdPrefix = 'ligand';
     } else if (densityScoringType === 'Receptor') {
-        layerData = data.receptor || [];
+        // Use component points for density, not centroids
+        layerData = data.receptor || []; // data is non-null here
         layerIdPrefix = 'receptor';
     }
 
     if (layerData && layerData.length > 0) { 
       const commonProps = {
           data: layerData,
-          getPosition: (d: PointWithLayer) => [d.x, d.y] as [number, number],
+          getPosition: (d: any) => [d.x, d.y] as [number, number],
           getWeight: 1,
           pickable: false,
       };
@@ -256,7 +398,7 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
 
       if (aggregationLayerType === 'ScreenGrid') {
           console.log(`[InteractionVisualization Layers] Creating ${layerIdPrefix} ScreenGridLayer`);
-          aggregationLayer = new ScreenGridLayer<PointWithLayer>({ 
+          aggregationLayer = new ScreenGridLayer<any>({ 
             ...commonProps,
             id: `${layerIdPrefix}-screengrid-layer`, 
             cellSizePixels: gridCellSizePixels,
@@ -266,7 +408,7 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
           });
       } else if (aggregationLayerType === 'Hexagon') {
           console.log(`[InteractionVisualization Layers] Creating ${layerIdPrefix} HexagonLayer`);
-          aggregationLayer = new HexagonLayer<PointWithLayer>({
+          aggregationLayer = new HexagonLayer<any>({
               ...commonProps,
               id: `${layerIdPrefix}-hexagon-layer`,
               radius: hexagonRadius,
@@ -275,7 +417,7 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
           });
       } else {
           console.log(`[InteractionVisualization Layers] Creating ${layerIdPrefix} HeatmapLayer`);
-          aggregationLayer = new HeatmapLayer<PointWithLayer>({
+          aggregationLayer = new HeatmapLayer<any>({
             ...commonProps,
             id: `${layerIdPrefix}-heatmap-layer`,
             radiusPixels: heatmapRadiusPixels,
@@ -287,33 +429,37 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
       }
     }
 
-    // --- Filter Scatterplot Layers based on pointsDisplayType --- 
-    const scatterLayersToShow = [];
-    if (pointsDisplayType === 'ligands' || pointsDisplayType === 'both') {
-        if (data.ligand && data.ligand.length > 0) scatterLayersToShow.push(baseLayers[0]);
-    }
-    if (pointsDisplayType === 'receptors' || pointsDisplayType === 'both') {
-        if (data.receptor && data.receptor.length > 0) scatterLayersToShow.push(baseLayers[1]);
-    }
-
     // --- Combine Layers --- 
     const finalLayers = [];
-    if (!isLoading) {
-        // Add boundaries first (render underneath)
-        finalLayers.push(...boundaryLayers);
+    // Add boundaries first (render underneath)
+    finalLayers.push(...boundaryLayers);
 
-        // Then add aggregation layer if active
-        if (aggregationLayer) {
-          finalLayers.push(aggregationLayer);
+    // Then add aggregation layer if active
+    if (aggregationLayer) {
+        finalLayers.push(aggregationLayer);
+    }
+    
+    // --- Directly add scatterplot layers based on pointsDisplayType --- 
+    // Note: baseLayers array contains ligand layer at [0] and receptor layer at [1]
+    // IF they were created earlier in the hook based on the presence of data.
+    const ligandLayerInstance = baseLayers.find(l => l?.id === 'ligand-layer');
+    const receptorLayerInstance = baseLayers.find(l => l?.id === 'receptor-layer');
+
+    if (pointsDisplayType === 'ligands' || pointsDisplayType === 'both') {
+        if (ligandLayerInstance) {
+            finalLayers.push(ligandLayerInstance);
         }
-        // Finally, add scatterplot layers
-        finalLayers.push(...scatterLayersToShow);
+    }
+    if (pointsDisplayType === 'receptors' || pointsDisplayType === 'both') {
+        if (receptorLayerInstance) {
+            finalLayers.push(receptorLayerInstance);
+        }
     }
 
     console.log('[InteractionVisualization Layers] Final layers array:', finalLayers.map(l => l?.id));
 
     return finalLayers;
-  }, [data.ligand, data.receptor, densityScoringType, pointsDisplayType, aggregationLayerType, isLoading, layerBoundaries, visibleLayers, layerColors]);
+  }, [data, densityScoringType, pointsDisplayType, aggregationLayerType, isLoading, layerBoundaries, visibleLayers, layerColors]);
 
   const toggleFullscreen = () => {
     setIsFullscreen(!isFullscreen);
@@ -414,7 +560,7 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
                   {(pointsDisplayType === 'receptors' || pointsDisplayType === 'both') && (
                       <div className={styles.legendItem}>
                           <div className={styles.legendColor} style={{ backgroundColor: 'blue' }} />
-                          <span>{receptorName}</span>
+                          <span>{data ? data.receptorName : 'Receptor'}</span>
                       </div>
                   )}
                   <div className={styles.controlGroup}>
@@ -424,11 +570,11 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
                           Off
                       </label>
                       <label>
-                          <input type="radio" name="densityScoring" value="Ligand" checked={densityScoringType === 'Ligand'} onChange={() => setDensityScoringType('Ligand')} disabled={data.ligand.length === 0} />
+                          <input type="radio" name="densityScoring" value="Ligand" checked={densityScoringType === 'Ligand'} onChange={() => setDensityScoringType('Ligand')} disabled={!data || data.ligand.length === 0} />
                           Ligand Density
                       </label>
                       <label>
-                          <input type="radio" name="densityScoring" value="Receptor" checked={densityScoringType === 'Receptor'} onChange={() => setDensityScoringType('Receptor')} disabled={data.receptor.length === 0} />
+                          <input type="radio" name="densityScoring" value="Receptor" checked={densityScoringType === 'Receptor'} onChange={() => setDensityScoringType('Receptor')} disabled={!data || data.receptor.length === 0} />
                           Receptor Density
                       </label>
                   </div>
@@ -454,15 +600,15 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
                           Off
                       </label>
                            <label>
-                              <input type="radio" name="pointsDisplay" value="ligands" checked={pointsDisplayType === 'ligands'} onChange={() => setPointsDisplayType('ligands')} disabled={data.ligand.length === 0} />
+                              <input type="radio" name="pointsDisplay" value="ligands" checked={pointsDisplayType === 'ligands'} onChange={() => setPointsDisplayType('ligands')} disabled={!data || data.ligand.length === 0} />
                               Ligands Only
                           </label>
                            <label>
-                              <input type="radio" name="pointsDisplay" value="receptors" checked={pointsDisplayType === 'receptors'} onChange={() => setPointsDisplayType('receptors')} disabled={data.receptor.length === 0} />
+                              <input type="radio" name="pointsDisplay" value="receptors" checked={pointsDisplayType === 'receptors'} onChange={() => setPointsDisplayType('receptors')} disabled={!data || data.receptor.length === 0} />
                               Receptors Only
                           </label>
                            <label>
-                              <input type="radio" name="pointsDisplay" value="both" checked={pointsDisplayType === 'both'} onChange={() => setPointsDisplayType('both')} disabled={data.ligand.length === 0 || data.receptor.length === 0}/>
+                              <input type="radio" name="pointsDisplay" value="both" checked={pointsDisplayType === 'both'} onChange={() => setPointsDisplayType('both')} disabled={!data || data.ligand.length === 0 || data.receptor.length === 0}/>
                               Show Both
                           </label>
                   </div>

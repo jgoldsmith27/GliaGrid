@@ -309,17 +309,29 @@ export class SharedDataStore {
             throw new Error(`Incomplete metadata for job ${jobId}. Cannot determine files or mappings.`);
         }
 
-        // 2. Determine File ID and Mapping based on fileType (expecting 'interactionPoints' for this path)
+        // 2. Determine File ID, Mapping, and Genes based on fileType
         let spatialFileId: string | null = null;
         let mapping: any = null; // Type this better if possible
         let ligandName: string | null = null;
         let receptorName: string | null = null;
+        let receptorComponentNames: string[] = []; // NEW: Store component names
+        let isComplexReceptor = false; // NEW: Flag for complex receptor
 
         if (fileType === 'interactionPoints' && options.ligand && options.receptor) {
             spatialFileId = metadata.inputs.files.spatialFileId;
             mapping = metadata.inputs.mappings.spatialMapping;
             ligandName = options.ligand;
-            receptorName = options.receptor;
+            receptorName = options.receptor; // Keep the original complex name if provided
+
+            // NEW: Check for complex receptor
+            if (receptorName.includes('_')) {
+                isComplexReceptor = true;
+                receptorComponentNames = receptorName.split('_');
+                console.log(`[SharedDataStore] Detected complex receptor: ${receptorName} -> Components: ${receptorComponentNames.join(', ')}`);
+            } else {
+                isComplexReceptor = false;
+                receptorComponentNames = [receptorName]; // Treat single receptor as a component list of one
+            }
 
             if (!spatialFileId || !mapping || !mapping.geneCol || !mapping.xCol || !mapping.yCol) {
                 throw new Error('Missing required spatial file ID or mapping info (gene, x, y) for interaction points.');
@@ -329,7 +341,8 @@ export class SharedDataStore {
         }
 
         // Extract genes and columns needed
-        const genesToFetch = [ligandName, receptorName].filter(Boolean) as string[];
+        // MODIFIED: Use ligandName and receptorComponentNames
+        const genesToFetch = [ligandName, ...receptorComponentNames].filter(Boolean) as string[];
         const columnsToFetch = [mapping.geneCol, mapping.xCol, mapping.yCol].filter(Boolean);
         const layerFilter = options.layer; // Check if a specific layer is requested
         if (layerFilter && mapping.layerCol) {
@@ -371,8 +384,9 @@ export class SharedDataStore {
         
         // 4. Process fetched spatial data into ligand/receptor points
         const ligandPoints: { x: number; y: number }[] = [];
-        const receptorPoints: { x: number; y: number }[] = [];
-        
+        // MODIFIED: Collect receptor component points with their gene names
+        const receptorComponentPoints: { x: number; y: number; gene: string }[] = [];
+
         if (spatialDataResult?.data) {
             for (const point of spatialDataResult.data) {
                 // Apply layer filtering post-fetch only if a specific layer (not 'whole_tissue') is requested
@@ -382,7 +396,8 @@ export class SharedDataStore {
                 }
                 
                 const gene = point[mapping.geneCol];
-                if (!ligandName || !receptorName) { console.warn("Ligand/Receptor name missing in comparison"); }
+                // MODIFIED: Check ligand/component names for safety
+                if (!ligandName || !receptorComponentNames || receptorComponentNames.length === 0) { console.warn("Ligand/Receptor component names missing in comparison"); }
                 // Log only the first few points to avoid flooding console
                 const currentPointIndex = spatialDataResult.data.indexOf(point);
                 if (currentPointIndex < 5) { // Log first 5 points
@@ -398,21 +413,27 @@ export class SharedDataStore {
                 }
 
                 if (gene === ligandName) {
+                    // Ligand points only need x, y
                     ligandPoints.push({ x, y });
                 }
-                if (gene === receptorName) { 
-                    receptorPoints.push({ x, y });
+                // MODIFIED: Check if gene matches any of the receptor components
+                if (receptorComponentNames.includes(gene)) {
+                    // Receptor points need x, y, and gene name for complex processing
+                    receptorComponentPoints.push({ x, y, gene });
                 }
             }
         }
         
+        // MODIFIED: Create the new data structure to resolve with
         const visualizationData = {
             ligand: ligandPoints,
-            receptor: receptorPoints,
-            warnings: spatialDataResult?.warnings || [] 
+            receptor: receptorComponentPoints, // Use the array containing component points
+            isComplex: isComplexReceptor,     // Include the flag
+            receptorName: receptorName,       // Include the original (potentially complex) name
+            warnings: spatialDataResult?.warnings || []
         };
-        
-        console.log(`[SharedDataStore] Processed points for L/R pair ${ligandName}-${receptorName} (Layer: ${layerFilter || 'All'}) - Ligands: ${ligandPoints.length}, Receptors: ${receptorPoints.length}`);
+
+        console.log(`[SharedDataStore] Processed points for L/R pair ${ligandName}-${receptorName} (Layer: ${layerFilter || 'All'}) - Ligands: ${ligandPoints.length}, Receptor Components: ${receptorComponentPoints.length}`);
 
         // 5. Cache and Resolve with the processed visualization data
         this.cache.set(cacheKey, visualizationData);
