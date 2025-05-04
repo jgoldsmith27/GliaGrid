@@ -3,6 +3,7 @@ import { ScatterplotLayer } from '@deck.gl/layers';
 import { ScreenGridLayer, HeatmapLayer, HexagonLayer } from '@deck.gl/aggregation-layers';
 import DeckGL from '@deck.gl/react';
 import { OrthographicView, OrthographicViewState, ViewStateChangeParameters, Color } from '@deck.gl/core';
+import { Button, CircularProgress, Box } from '@mui/material';
 import styles from './InteractionVisualization.module.css';
 
 interface Point {
@@ -26,6 +27,8 @@ interface InteractionVisualizationProps {
   ligandName: string;
   receptorName: string;
   currentScope: 'whole_tissue' | 'layers';
+  isLoading: boolean;
+  cancelFetch: () => void;
 }
 
 const getInitialViewState = (ligandData: Point[], receptorData: Point[]) => {
@@ -63,7 +66,7 @@ type DensityScoringType = 'Off' | 'Ligand' | 'Receptor';
 type AggregationLayerType = 'ScreenGrid' | 'Hexagon' | 'Heatmap';
 type PointsDisplayType = 'off' | 'ligands' | 'receptors' | 'both';
 
-const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ data, ligandName, receptorName, currentScope }) => {
+const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ data, ligandName, receptorName, currentScope, isLoading, cancelFetch }) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [densityScoringType, setDensityScoringType] = useState<DensityScoringType>('Off'); 
   const [aggregationLayerType, setAggregationLayerType] = useState<AggregationLayerType>('ScreenGrid');
@@ -107,6 +110,8 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
   }, []);
 
   const layers = useMemo(() => {
+    if (isLoading) return [];
+
     const baseLayers = [
       new ScatterplotLayer<Point>({
         id: 'ligand-layer',
@@ -226,16 +231,18 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
     }
 
     const finalLayers = [];
-    if (aggregationLayer) {
-      finalLayers.push(aggregationLayer);
+    if (!isLoading) {
+        if (aggregationLayer) {
+          finalLayers.push(aggregationLayer);
+        }
+        finalLayers.push(...scatterLayersToShow);
     }
-    finalLayers.push(...scatterLayersToShow);
 
     console.log('[InteractionVisualization Layers] Final layers array:', finalLayers.map(l => l?.id));
 
     return finalLayers;
 
-  }, [data.ligand, data.receptor, densityScoringType, pointsDisplayType, aggregationLayerType]);
+  }, [data.ligand, data.receptor, densityScoringType, pointsDisplayType, aggregationLayerType, isLoading]);
 
   const toggleFullscreen = () => {
     setIsFullscreen(!isFullscreen);
@@ -246,6 +253,34 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
   return (
     <div className={`${styles.interactionVisualizationContainer} ${isFullscreen ? styles.fullscreen : ''}`}>
       <div className={styles.deckGlWrapper}>
+        {isLoading && (
+          <Box
+            sx={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.5)',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'center',
+              alignItems: 'center',
+              zIndex: 10,
+              color: 'white'
+            }}
+          >
+            <CircularProgress color="inherit" />
+            <Button 
+              variant="contained" 
+              color="secondary" 
+              onClick={cancelFetch} 
+              sx={{ mt: 2 }}
+            >
+              Cancel Loading
+            </Button>
+          </Box>
+        )}
         <DeckGL
           views={new OrthographicView({id: 'ortho-view'})}
           viewState={viewState}
@@ -256,84 +291,86 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
           getTooltip={({object}) => object && `Point: (${object.x.toFixed(2)}, ${object.y.toFixed(2)})`}
           style={{ width: '100%', height: '100%', position: 'relative' }}
         />
-        <div className={styles.deckOverlayControls}>
-            <div className={styles.deckButtons}>
-                <div className={styles.zoomControls}>
-                    <button onClick={() => handleZoom(1)} title="Zoom In">+</button>
-                    <button onClick={() => handleZoom(-1)} title="Zoom Out">-</button>
-                </div>
-                <button 
-                    className={styles.fullscreenButton}
-                    onClick={toggleFullscreen}
-                    title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
-                >
-                    {isFullscreen ? "✕" : "⛶"}
-                </button>
-            </div>
-            <div className={styles.legendContainer}>
-                {(pointsDisplayType === 'ligands' || pointsDisplayType === 'both') && (
-                    <div className={styles.legendItem}>
-                        <div className={styles.legendColor} style={{ backgroundColor: 'red' }} />
-                        <span>{ligandName}</span>
-                    </div>
-                )}
-                {(pointsDisplayType === 'receptors' || pointsDisplayType === 'both') && (
-                    <div className={styles.legendItem}>
-                        <div className={styles.legendColor} style={{ backgroundColor: 'blue' }} />
-                        <span>{receptorName}</span>
-                    </div>
-                )}
-                <div className={styles.controlGroup}>
-                    <span className={styles.controlLabel}>Density Scoring:</span>
-                    <label>
-                        <input type="radio" name="densityScoring" value="Off" checked={densityScoringType === 'Off'} onChange={() => setDensityScoringType('Off')} />
-                        Off
-                    </label>
-                    <label>
-                        <input type="radio" name="densityScoring" value="Ligand" checked={densityScoringType === 'Ligand'} onChange={() => setDensityScoringType('Ligand')} disabled={data.ligand.length === 0} />
-                        Ligand Density
-                    </label>
-                    <label>
-                        <input type="radio" name="densityScoring" value="Receptor" checked={densityScoringType === 'Receptor'} onChange={() => setDensityScoringType('Receptor')} disabled={data.receptor.length === 0} />
-                        Receptor Density
-                    </label>
-                </div>
-                <div className={styles.controlGroup} >
-                     <span className={styles.controlLabel}>Density Style:</span>
-                    <label>
-                        <input type="radio" name="aggType" value="ScreenGrid" checked={aggregationLayerType === 'ScreenGrid'} onChange={() => setAggregationLayerType('ScreenGrid')} disabled={densityScoringType === 'Off'} />
-                        Grid
-                    </label>
-                     <label>
-                        <input type="radio" name="aggType" value="Hexagon" checked={aggregationLayerType === 'Hexagon'} onChange={() => setAggregationLayerType('Hexagon')} disabled={densityScoringType === 'Off'} />
-                        Hexagon
-                    </label>
-                    <label>
-                        <input type="radio" name="aggType" value="Heatmap" checked={aggregationLayerType === 'Heatmap'} onChange={() => setAggregationLayerType('Heatmap')} disabled={densityScoringType === 'Off'} />
-                        Heatmap
-                    </label>
-                </div>
-                <div className={styles.controlGroup}>
-                    <span className={styles.controlLabel}>Points:</span>
-                    <label>
-                        <input type="radio" name="pointsDisplay" value="off" checked={pointsDisplayType === 'off'} onChange={() => setPointsDisplayType('off')} />
-                        Off
-                    </label>
-                     <label>
-                        <input type="radio" name="pointsDisplay" value="ligands" checked={pointsDisplayType === 'ligands'} onChange={() => setPointsDisplayType('ligands')} disabled={data.ligand.length === 0} />
-                        Ligands Only
-                    </label>
-                     <label>
-                        <input type="radio" name="pointsDisplay" value="receptors" checked={pointsDisplayType === 'receptors'} onChange={() => setPointsDisplayType('receptors')} disabled={data.receptor.length === 0} />
-                        Receptors Only
-                    </label>
-                     <label>
-                        <input type="radio" name="pointsDisplay" value="both" checked={pointsDisplayType === 'both'} onChange={() => setPointsDisplayType('both')} disabled={data.ligand.length === 0 || data.receptor.length === 0}/>
-                        Show Both
-                    </label>
-                </div>
-            </div>
-        </div>
+        {!isLoading && (
+          <div className={styles.deckOverlayControls}>
+              <div className={styles.deckButtons}>
+                  <div className={styles.zoomControls}>
+                      <button onClick={() => handleZoom(1)} title="Zoom In">+</button>
+                      <button onClick={() => handleZoom(-1)} title="Zoom Out">-</button>
+                  </div>
+                  <button 
+                      className={styles.fullscreenButton}
+                      onClick={toggleFullscreen}
+                      title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+                  >
+                      {isFullscreen ? "✕" : "⛶"}
+                  </button>
+              </div>
+              <div className={styles.legendContainer}>
+                  {(pointsDisplayType === 'ligands' || pointsDisplayType === 'both') && (
+                      <div className={styles.legendItem}>
+                          <div className={styles.legendColor} style={{ backgroundColor: 'red' }} />
+                          <span>{ligandName}</span>
+                      </div>
+                  )}
+                  {(pointsDisplayType === 'receptors' || pointsDisplayType === 'both') && (
+                      <div className={styles.legendItem}>
+                          <div className={styles.legendColor} style={{ backgroundColor: 'blue' }} />
+                          <span>{receptorName}</span>
+                      </div>
+                  )}
+                  <div className={styles.controlGroup}>
+                      <span className={styles.controlLabel}>Density Scoring:</span>
+                      <label>
+                          <input type="radio" name="densityScoring" value="Off" checked={densityScoringType === 'Off'} onChange={() => setDensityScoringType('Off')} />
+                          Off
+                      </label>
+                      <label>
+                          <input type="radio" name="densityScoring" value="Ligand" checked={densityScoringType === 'Ligand'} onChange={() => setDensityScoringType('Ligand')} disabled={data.ligand.length === 0} />
+                          Ligand Density
+                      </label>
+                      <label>
+                          <input type="radio" name="densityScoring" value="Receptor" checked={densityScoringType === 'Receptor'} onChange={() => setDensityScoringType('Receptor')} disabled={data.receptor.length === 0} />
+                          Receptor Density
+                      </label>
+                  </div>
+                  <div className={styles.controlGroup} >
+                       <span className={styles.controlLabel}>Density Style:</span>
+                      <label>
+                          <input type="radio" name="aggType" value="ScreenGrid" checked={aggregationLayerType === 'ScreenGrid'} onChange={() => setAggregationLayerType('ScreenGrid')} disabled={densityScoringType === 'Off'} />
+                          Grid
+                      </label>
+                       <label>
+                          <input type="radio" name="aggType" value="Hexagon" checked={aggregationLayerType === 'Hexagon'} onChange={() => setAggregationLayerType('Hexagon')} disabled={densityScoringType === 'Off'} />
+                          Hexagon
+                      </label>
+                      <label>
+                          <input type="radio" name="aggType" value="Heatmap" checked={aggregationLayerType === 'Heatmap'} onChange={() => setAggregationLayerType('Heatmap')} disabled={densityScoringType === 'Off'} />
+                          Heatmap
+                      </label>
+                  </div>
+                  <div className={styles.controlGroup}>
+                      <span className={styles.controlLabel}>Points:</span>
+                      <label>
+                          <input type="radio" name="pointsDisplay" value="off" checked={pointsDisplayType === 'off'} onChange={() => setPointsDisplayType('off')} />
+                          Off
+                      </label>
+                           <label>
+                              <input type="radio" name="pointsDisplay" value="ligands" checked={pointsDisplayType === 'ligands'} onChange={() => setPointsDisplayType('ligands')} disabled={data.ligand.length === 0} />
+                              Ligands Only
+                          </label>
+                           <label>
+                              <input type="radio" name="pointsDisplay" value="receptors" checked={pointsDisplayType === 'receptors'} onChange={() => setPointsDisplayType('receptors')} disabled={data.receptor.length === 0} />
+                              Receptors Only
+                          </label>
+                           <label>
+                              <input type="radio" name="pointsDisplay" value="both" checked={pointsDisplayType === 'both'} onChange={() => setPointsDisplayType('both')} disabled={data.ligand.length === 0 || data.receptor.length === 0}/>
+                              Show Both
+                          </label>
+                  </div>
+              </div>
+          </div>
+        )}
       </div>
     </div>
   );

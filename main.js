@@ -6,6 +6,9 @@ const Papa = require('papaparse'); // Added for CSV parsing
 const zmq = require('zeromq'); // Restored for ZeroMQ IPC
 const readline = require('readline'); // Added for line-by-line reading
 
+// --- Cancellation Tracking for File Reads ---
+const activeReadRequests = new Map(); // Map<requestId, isCancelled>
+
 // --- Project File Directory Setup ---
 const projectsDir = path.join(app.getPath('userData'), 'projects');
 if (!fs.existsSync(projectsDir)) {
@@ -228,9 +231,31 @@ ipcMain.handle('delete-project', async (event, filePath, projectName) => {
 });
 
 // --- Direct File Access (Direct IPC) ---
-ipcMain.handle('read-backend-file', async (event, fileId, options = {}) => {
+
+// Listener for cancellation requests from preload
+ipcMain.on('cancel-read-request', (event, requestId) => {
+  if (activeReadRequests.has(requestId)) {
+    console.log(`[main.js] Received cancel request for read ID: ${requestId}`);
+    activeReadRequests.set(requestId, true); // Mark as cancelled
+  } else {
+    console.warn(`[main.js] Received cancel request for unknown/completed read ID: ${requestId}`);
+  }
+});
+
+ipcMain.handle('read-backend-file', async (event, fileId, options = {}, requestId) => {
+  // Check if a requestId was provided (should be from preload)
+  if (!requestId) {
+    console.error('[main.js] read-backend-file invoked without a requestId.');
+    return { success: false, error: 'Internal error: Missing request ID for cancellation.' };
+  }
+
   // Construct path to temporary uploads directory
   const backendDir = path.join(__dirname, 'backend', '.temp_uploads');
+  
+  // Register this request for cancellation tracking
+  activeReadRequests.set(requestId, false);
+  // Define the cancellation check function for this request
+  const isCancelled = () => activeReadRequests.get(requestId) === true;
   
   try {
     // Find the file with this ID
@@ -243,181 +268,161 @@ ipcMain.handle('read-backend-file', async (event, fileId, options = {}) => {
     
     const filePath = path.join(backendDir, matchingFile);
     
+    // Check for cancellation before starting potentially long read
+    if (isCancelled()) {
+      console.log(`[main.js] Read request ${requestId} cancelled before starting file read.`);
+      throw new Error('Operation cancelled'); // Throw cancellation error
+    }
+
     // Handle different file types
     const ext = path.extname(filePath).toLowerCase();
     if (ext === '.csv') {
-      // Read and parse CSV with chunking
-      return readCsvChunked(filePath, options);
+      // Read and parse CSV, passing the cancellation checker
+      return await readCsvChunked(filePath, options, isCancelled);
     } else if (ext === '.h5ad') {
       // For H5AD, we might need to use Python through child_process
-      throw new Error('H5AD direct reading not implemented yet');
+      // Cancellation for child_process would need specific handling (e.g., process.kill)
+      throw new Error('H5AD direct reading cancellation not implemented yet');
     }
     
     throw new Error(`Unsupported file type: ${ext}`);
   } catch (error) {
-    console.error('Error reading backend file:', error);
-    throw error;
+    console.error(`[main.js] Error reading backend file (Req ID: ${requestId}):`, error);
+    // If the error is our specific cancellation error, return it structured
+    if (error.message === 'Operation cancelled') {
+        return { success: false, error: error.message, cancelled: true };
+    }
+    // Otherwise, return a generic error structure
+    return { success: false, error: error.message };
+  } finally {
+    // Always clean up the request ID from the tracking map
+    activeReadRequests.delete(requestId);
+    console.log(`[main.js] Cleaned up read request ID: ${requestId}`);
   }
 });
 
-// Helper function to read CSV with efficient sampling, filtering, and chunking
-async function readCsvChunked(filePath, options = {}) {
-  const {
-    offset = 0,
-    limit = null,
-    sampleRate = 1.0,
-    filter = null,
-    columns = null,
-    // Add resolution alias for sampleRate for compatibility if needed
-    resolution
-  } = options;
-
-  // Use resolution if provided and sampleRate is default, otherwise prefer sampleRate
-  const effectiveSampleRate = (resolution !== undefined && sampleRate === 1.0) ? resolution : sampleRate;
-
-  const useFilter = filter && filter.column && Array.isArray(filter.values) && filter.values.length > 0;
-  const filterColumn = useFilter ? filter.column : null;
-  const filterValuesSet = useFilter ? new Set(filter.values) : null;
-
-  const useColumns = Array.isArray(columns) && columns.length > 0;
-  const columnSet = useColumns ? new Set(columns) : null;
-
-  console.log(`[main.js] readCsvChunked: Reading ${filePath} with options:`, { offset, limit, sampleRate: effectiveSampleRate, filter, columns });
+// --- Helper function for reading CSV with filtering and cancellation ---
+async function readCsvChunked(filePath, options = {}, isCancelled) {
+  console.log(`[main.js] readCsvChunked called for ${filePath} with options:`, options);
+  const { filter, columns } = options; // Destructure options
+  const data = [];
+  const warnings = [];
+  let returnedRows = 0;
+  // Note: totalRows calculation might be inefficient for large files without reading fully
+  // Consider skipping totalRows or finding a faster way if performance is critical.
 
   return new Promise((resolve, reject) => {
-    const results = [];
-    let header = null;
-    let headerIndices = {}; // Map header names to indices
-    let requiredIndices = new Set(); // Indices of columns to keep
-    let filterColumnIndex = -1;
-
-    let linesProcessed = 0; // Includes header
-    let linesKeptAfterSampling = 0;
-    let linesReturned = 0;
-
-    const fileStream = fs.createReadStream(filePath);
-    const rl = readline.createInterface({
+    const fileStream = fs.createReadStream(filePath, { encoding: 'utf-8' });
+    const lineReader = readline.createInterface({
       input: fileStream,
       crlfDelay: Infinity
     });
 
-    rl.on('line', (line) => {
-      linesProcessed++;
+    let headers = [];
+    let headerProcessed = false;
+    let filterColIndex = -1;
+    let columnIndices = [];
 
-      // 1. Process Header
-      if (!header) {
-        header = Papa.parse(line, { header: false }).data[0];
-        headerIndices = header.reduce((acc, colName, index) => {
-          acc[colName] = index;
-          return acc;
-        }, {});
+    lineReader.on('line', (line) => {
+      // *** Check for cancellation frequently ***
+      if (isCancelled()) {
+        console.log(`[main.js] Cancellation detected during CSV read of ${filePath}`);
+        lineReader.close(); // Close the reader
+        fileStream.destroy(); // Destroy the stream
+        // Reject the promise with a specific cancellation error
+        reject(new Error('Operation cancelled'));
+        return; 
+      }
+      
+      if (!headerProcessed) {
+        headers = line.split(',').map(h => h.trim()); // Basic CSV split, consider PapaParse for robustness
+        headerProcessed = true;
 
-        // Validate filter column
-        if (useFilter) {
-          if (!(filterColumn in headerIndices)) {
-            rl.close();
-            return reject(new Error(`Filter column '${filterColumn}' not found in CSV header.`));
+        // Determine indices based on headers
+        if (filter && filter.column) {
+          filterColIndex = headers.indexOf(filter.column);
+          if (filterColIndex === -1) {
+            warnings.push(`Filter column "${filter.column}" not found.`);
           }
-          filterColumnIndex = headerIndices[filterColumn];
         }
-
-        // Validate and map selected columns
-        if (useColumns) {
-          const missingCols = columns.filter(col => !(col in headerIndices));
-          if (missingCols.length > 0) {
-            rl.close();
-            return reject(new Error(`Selected column(s) not found in CSV header: ${missingCols.join(', ')}`));
-          }
-          requiredIndices = new Set(columns.map(col => headerIndices[col]));
+        if (columns && columns.length > 0) {
+          columnIndices = columns.map(col => {
+            const index = headers.indexOf(col);
+            if (index === -1) {
+              warnings.push(`Requested column "${col}" not found.`);
+            }
+            return index;
+          }).filter(index => index !== -1); // Only keep valid indices
         } else {
-          // If not selecting specific columns, keep all
-          requiredIndices = new Set(header.map((_, index) => index));
+          // If no specific columns requested, use all columns
+          columnIndices = headers.map((_, index) => index);
         }
-        return; // Skip header line from data processing
+        return; // Skip processing header row as data
       }
+
+      const values = line.split(',').map(v => v.trim());
       
-      // Stop reading if limit is already reached (optimization)
-      if (limit !== null && linesReturned >= limit) {
-          if (!rl.closed) {
-              rl.close(); // Close the readline interface
-              fileStream.destroy(); // Destroy the underlying file stream
-          }
-          return;
-      }
-
-      // 2. Apply Sampling (Probabilistic)
-      if (effectiveSampleRate < 1.0 && Math.random() > effectiveSampleRate) {
-        return; // Skip this line
-      }
-      linesKeptAfterSampling++;
-
-      // 3. Parse the sampled line (only if needed for filtering or result)
-      // Use PapaParse for robust CSV parsing of the single line
-      const rowDataArray = Papa.parse(line, { header: false }).data[0];
-      
-      // Create object if filtering or selecting columns, otherwise keep array?
-      // Let's create object for easier access
-      const rowData = {};
-      header.forEach((colName, index) => {
-           if (requiredIndices.has(index)) { // Only include required columns
-              rowData[colName] = rowDataArray[index];
-           }
-      });
-
-      // 4. Apply Filtering (on sampled data)
-      if (useFilter) {
-        const value = rowDataArray[filterColumnIndex]; // Get value using index
-        if (!filterValuesSet.has(value)) {
-          return; // Skip this line
+      // Apply row filter if specified and valid
+      if (filter && filter.values && filterColIndex !== -1) {
+        const cellValue = values[filterColIndex];
+        // Simple includes check, adjust if type conversion or specific logic needed
+        if (!filter.values.includes(cellValue)) {
+          return; // Skip row if it doesn't match filter
         }
       }
 
-      // 5. Apply Offset (based on lines *kept* after sampling/filtering)
-      if (linesKeptAfterSampling <= offset) { 
-        return; // Skip due to offset
+      // Construct row object with requested columns
+      const rowObject = {};
+      for (const index of columnIndices) {
+        if (index < values.length) { // Check bounds
+          rowObject[headers[index]] = values[index];
+        } else {
+            rowObject[headers[index]] = undefined; // Handle case where row has fewer columns than header
+        }
       }
+      data.push(rowObject);
+      returnedRows++;
 
-      // 6. Select columns (already done when creating rowData object)
-      // let finalRowData = rowData;
-      // if (useColumns) {
-      //   finalRowData = {};
-      //   for (const col of columnSet) {
-      //     finalRowData[col] = rowData[col];
-      //   }
-      // }
+      // Optional: Add limits or sampling logic here if needed
+    });
 
-      // 7. Add to results and check Limit
-      results.push(rowData);
-      linesReturned++;
+    lineReader.on('close', () => {
+       // Check cancellation one last time after closing (in case it happened between last line and close)
+      if (isCancelled()) {
+           console.log(`[main.js] Cancellation detected just before resolving CSV read of ${filePath}`);
+           reject(new Error('Operation cancelled'));
+           return;
+      }
+      console.log(`[main.js] Finished reading ${returnedRows} rows from ${filePath}`);
+      resolve({ 
+          success: true, 
+          data: data, 
+          returnedRows: returnedRows, 
+          // totalRows: could be estimated or determined differently if needed
+          warnings: warnings 
+        });
+    });
 
-      if (limit !== null && linesReturned >= limit) {
-         if (!rl.closed) {
-             rl.close();
-             fileStream.destroy();
-         }
+    lineReader.on('error', (err) => {
+      console.error(`[main.js] Error reading CSV file ${filePath}:`, err);
+      // Check if the error is due to cancellation (might be wrapped)
+      if (err.message === 'Operation cancelled') {
+           reject(err); // Propagate cancellation error
+      } else {
+           reject(new Error(`Failed to read CSV: ${err.message}`)); // Wrap other errors
       }
     });
-
-    rl.on('close', () => {
-      console.log(`[main.js] readCsvChunked: Completed. Total lines processed: ${linesProcessed}, Kept after sampling: ${linesKeptAfterSampling}, Returned after offset/limit/filter: ${results.length}`);
-      resolve({
-        data: results,
-        totalRows: linesProcessed -1, // Exclude header from count
-        returnedRows: results.length,
-        // Provide more detailed skip counts if needed
-      });
+    
+    fileStream.on('error', (err) => {
+       console.error(`[main.js] File stream error for ${filePath}:`, err);
+       lineReader.close(); // Ensure linereader is closed on stream error
+        if (err.message === 'Operation cancelled') {
+           reject(err);
+       } else {
+           reject(new Error(`File stream error: ${err.message}`));
+       }
     });
 
-    rl.on('error', (error) => {
-      console.error(`[main.js] readCsvChunked: Error reading ${filePath}:`, error);
-      reject(error);
-    });
-
-    fileStream.on('error', (error) => { // Handle stream errors too
-        console.error(`[main.js] readCsvChunked: File stream error for ${filePath}:`, error);
-        if (!rl.closed) rl.close();
-        reject(error);
-    });
   });
 }
 

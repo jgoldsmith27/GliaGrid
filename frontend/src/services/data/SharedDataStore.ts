@@ -22,16 +22,18 @@ export interface DataRequestOptions {
   layer?: string; // For layer-specific filtering in handleRequest
   ligand?: string; // For interaction points
   receptor?: string; // For interaction points
+  signal?: AbortSignal; // Add signal to options
 }
 
 // Data request type for the priority queue
 interface DataLoadRequest {
   jobId: string;
   fileType: string;
-  options: DataRequestOptions;
+  options: DataRequestOptions; // Options now include the signal
   cacheKey: string;
   resolve?: (value: any) => void;
   reject?: (reason: any) => void;
+  // signal?: AbortSignal; // Signal is now within options
 }
 
 /**
@@ -60,7 +62,11 @@ export class SharedDataStore {
 
   // Public method to request data - Simplified
   public requestData(jobId: string, fileType: string, options: DataRequestOptions = {}): Promise<any> {
-    const cacheKey = `${jobId}_${fileType}_${JSON.stringify(options)}`;
+    const { signal } = options; // Extract signal from options
+    // Create a cache key *without* the signal, as the signal is transient
+    const cacheKeyOptions = { ...options }; 
+    delete cacheKeyOptions.signal; 
+    const cacheKey = `${jobId}_${fileType}_${JSON.stringify(cacheKeyOptions)}`;
 
     // 1. Check Cache
     if (this.cache.has(cacheKey)) {
@@ -78,21 +84,50 @@ export class SharedDataStore {
     console.log(`[SharedDataStore] Requesting data (Cache miss): ${cacheKey}`);
     // 3. Create and store the promise, then immediately start handling
     const promise = new Promise<any>(async (resolve, reject) => {
+       // Check if aborted *before* even creating the request object
+       if (signal?.aborted) {
+           console.log(`[SharedDataStore] Request aborted before initiation: ${cacheKey}`);
+           // Need to reject the promise so the caller knows it was cancelled.
+           // Use a specific error type or message if possible.
+           reject(new DOMException('Request aborted', 'AbortError')); 
+           // Don't store this promise in loadingPromises
+           return; 
+       }
+
        const request: DataLoadRequest = {
          jobId,
          fileType,
-         options,
+         options, // Pass the full options including the signal
          cacheKey,
          resolve, // Pass resolve/reject to handleRequest
          reject,
        };
+
+       // Add signal listener to reject the promise if aborted *while waiting* 
+       // (though direct call makes this less likely, good practice)
+       const abortHandler = () => {
+         console.log(`[SharedDataStore] Abort signal received for loading request: ${cacheKey}`);
+         // Check if the promise is still pending (i.e., not already resolved/rejected)
+         if (this.loadingPromises.has(cacheKey)) {
+             reject(new DOMException('Request aborted', 'AbortError'));
+             this.loadingPromises.delete(cacheKey); // Clean up on abort
+         }
+       };
+       signal?.addEventListener('abort', abortHandler);
+
        try {
            // Directly call handleRequest now, no queueing
-           await this.handleRequest(request);
+           await this.handleRequest(request); // Pass the full request object
        } catch (error) {
            console.error(`[SharedDataStore] Error directly handling request ${cacheKey}:`, error);
-           if (reject) reject(error); // Ensure rejection propagates
+           // Ensure rejection propagates, unless it's an AbortError we already handled
+           if (!(error instanceof DOMException && error.name === 'AbortError')) {
+               if (reject) reject(error); 
+           }
            this.loadingPromises.delete(cacheKey); // Clean up promise if handling fails here
+       } finally {
+           // Remove the listener once done
+           signal?.removeEventListener('abort', abortHandler);
        }
     });
 
@@ -238,16 +273,37 @@ export class SharedDataStore {
   // Handles the actual data fetching for INTERACTION points (keep this logic)
   private async handleRequest(request: DataLoadRequest): Promise<void> {
     const { jobId, fileType, options, cacheKey, resolve, reject } = request;
+    const { signal } = options; // Extract signal from options
 
     if (!resolve || !reject) {
       console.error('[SharedDataStore] handleRequest called without resolve/reject functions.');
       this.loadingPromises.delete(cacheKey);
       return; 
     }
+    
+    // Check if aborted before starting the main logic
+    if (signal?.aborted) {
+        console.log(`[SharedDataStore] handleRequest aborted at start for: ${cacheKey}`);
+        reject(new DOMException('Request aborted', 'AbortError'));
+        this.loadingPromises.delete(cacheKey);
+        return;
+    }
+    
+    // Add listener within handleRequest scope as well
+    const abortHandler = () => {
+        console.log(`[SharedDataStore] Abort signal received during handleRequest for: ${cacheKey}`);
+        // Reject the promise associated with this specific request
+        reject(new DOMException('Request aborted', 'AbortError'));
+        this.loadingPromises.delete(cacheKey); // Ensure cleanup
+    };
+    signal?.addEventListener('abort', abortHandler);
 
     try {
         // 1. Get Job Metadata (which includes file IDs and mappings)
-        const metadata = await this.getJobMetadata(jobId);
+        // Potentially check signal?.aborted after async operations
+        const metadata = await this.getJobMetadata(jobId); 
+        if (signal?.aborted) throw new DOMException('Request aborted', 'AbortError'); 
+        
         if (!metadata?.inputs?.files || !metadata?.inputs?.mappings) {
             throw new Error(`Incomplete metadata for job ${jobId}. Cannot determine files or mappings.`);
         }
@@ -288,14 +344,18 @@ export class SharedDataStore {
             throw new Error('Electron API function readBackendFile is not available.');
         }
         
+        // *** Pass the signal to the backend API ***
         const spatialDataResult = await window.electronAPI.readBackendFile(spatialFileId, {
            filter: {
                column: mapping.geneCol,
                values: genesToFetch 
            },
            columns: columnsToFetch 
-        });
+        }, signal); // Pass signal as the third argument (assuming API supports it)
         
+        // Check if aborted immediately after the potentially long operation
+        if (signal?.aborted) throw new DOMException('Request aborted', 'AbortError');
+
         console.log(`[SharedDataStore] Received ${spatialDataResult?.returnedRows || 0} points from readBackendFile for L/R pair ${ligandName}-${receptorName}`);
         
         // 4. Process fetched spatial data into ligand/receptor points
@@ -349,9 +409,22 @@ export class SharedDataStore {
         this.loadingPromises.delete(cacheKey); // Remove promise on success
 
       } catch (error) {
-          console.error(`[SharedDataStore] Error in handleRequest for ${cacheKey}:`, error);
-          reject(error);
-          this.loadingPromises.delete(cacheKey); // Also remove promise on handleRequest error
+          // Handle AbortError specifically
+          if (error instanceof DOMException && error.name === 'AbortError') {
+              console.log(`[SharedDataStore] Caught AbortError in handleRequest for ${cacheKey}`);
+              // Ensure reject was called by the listener or throw
+              if (!signal?.aborted) { 
+                  reject(error); // Should have been rejected by listener, but belt-and-suspenders
+              }
+          } else {
+              console.error(`[SharedDataStore] Error in handleRequest for ${cacheKey}:`, error);
+              reject(error); // Reject with other errors
+          }
+          // Ensure cleanup happens regardless of error type
+          this.loadingPromises.delete(cacheKey); 
+      } finally {
+          // Always remove the listener when handleRequest finishes
+           signal?.removeEventListener('abort', abortHandler);
       }
   }
 

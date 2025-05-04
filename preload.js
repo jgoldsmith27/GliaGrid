@@ -8,7 +8,41 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getFilePath: (fileId) => ipcRenderer.invoke('get-file-path', fileId),
   readCsvHeaders: (fileId) => ipcRenderer.invoke('read-csv-headers', fileId),
   readCsvChunk: (fileId, options) => ipcRenderer.invoke('read-csv-chunk', fileId, options),
-  readBackendFile: (fileId, options) => ipcRenderer.invoke('read-backend-file', fileId, options),
+  readBackendFile: (fileId, options, signal) => {
+    // Generate a unique ID for this request for cancellation tracking
+    const requestId = `readReq-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
+    // Create a promise that resolves/rejects based on the IPC invoke
+    const invokePromise = ipcRenderer.invoke('read-backend-file', fileId, options, requestId);
+
+    // Handle the AbortSignal if provided
+    let abortListener = null;
+    if (signal) {
+      abortListener = () => {
+        console.log(`[preload] Abort signal received for request: ${requestId}. Sending cancel IPC.`);
+        // Send a message to the main process to cancel this specific request
+        ipcRenderer.send('cancel-read-request', requestId);
+      };
+
+      // If already aborted before we even start, trigger immediately
+      if (signal.aborted) {
+        abortListener();
+      } else {
+        signal.addEventListener('abort', abortListener);
+      }
+    }
+
+    // Clean up the listener when the invoke completes or is aborted
+    const cleanup = () => {
+      if (signal && abortListener) {
+        signal.removeEventListener('abort', abortListener);
+      }
+    };
+
+    invokePromise.then(cleanup, cleanup); // Cleanup on resolve or reject
+
+    return invokePromise; // Return the original promise from invoke
+  },
   removeFile: (fileId) => ipcRenderer.invoke('remove-file', fileId),
   
   // Project Management

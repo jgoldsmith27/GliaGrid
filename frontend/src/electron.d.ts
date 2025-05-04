@@ -40,7 +40,7 @@ declare global {
         getFilePath: (fileId: string) => Promise<any>;
         readCsvHeaders: (fileId: string) => Promise<{ success: boolean; headers?: string[]; error?: string }>;
         readCsvChunk: (fileId: string, options: any) => Promise<{ success: boolean; data?: any[]; headers?: string[]; stats?: any; error?: string }>;
-        readBackendFile: (fileId: string, options: any) => Promise<{ success: boolean; data?: any[]; returnedRows?: number; totalRows?: number; warnings?: string[]; error?: string }>;
+        readBackendFile: (fileId: string, options: any, signal?: AbortSignal) => Promise<{ success: boolean; data?: any[]; returnedRows?: number; totalRows?: number; warnings?: string[]; error?: string }>;
         removeFile: (fileId: string) => Promise<any>;
         
         // --- Job Management & Status (Matches preload.js) ---
