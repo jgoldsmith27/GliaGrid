@@ -73,7 +73,8 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
       // Access results from the 'outputs' field
       const outputs = jobStatus?.results?.outputs;
       if (outputs) {
-         setAvailableLayers(Object.keys(outputs).filter(k => k !== 'whole_tissue'));
+         // Filter out both 'whole_tissue' and 'layer_boundaries'
+         setAvailableLayers(Object.keys(outputs).filter(k => k !== 'whole_tissue' && k !== 'layer_boundaries'));
       } else {
          setAvailableLayers([]); // Clear if no results
       }
