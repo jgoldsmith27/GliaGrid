@@ -172,12 +172,17 @@
   z-index: 10;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
-  gap: 12px;
-  background-color: rgba(255, 255, 255, 0.9); /* More opaque */
-  padding: 12px;
+  align-items: flex-start; /* Align items to the start (left) */
+  gap: 16px; /* Increased gap for better separation */
+  background-color: rgba(255, 255, 255, 0.95); /* Slightly more opaque */
+  padding: 16px;
+  padding-right: 8px; /* Reduce right padding slightly for scrollbar space */
   border-radius: 8px; /* Match panels */
   box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1); /* Tailwind shadow-md */
+  max-width: 280px; /* Slightly wider */
+  overflow-y: scroll; /* Always show vertical scrollbar */
+  /* max-height: calc(100vh - 32px); */ /* Replaced vh-based height */
+  max-height: 500px; /* Set max-height relative to parent container's fixed height */
 }
 
 /* Update button styles */
@@ -204,11 +209,12 @@
 
 /* Legend styling */
 .legend {
-  background: rgba(255, 255, 255, 0.90);
-  padding: 12px 16px;
-  border-radius: 6px;
-  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  border: 1px solid #e2e8f0; /* Cool Gray 200 */
+  background: transparent; /* Remove specific background, inherit from parent */
+  padding: 0; /* Remove padding, handled by parent */
+  border-radius: 0;
+  box-shadow: none;
+  border: none; /* Remove border */
+  width: 100%; /* Occupy full width of the controls container */
 }
 
 .legendItem {
@@ -232,27 +238,54 @@
 }
 
 /* Example existing rule */
-.deckOverlayControls {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    background-color: rgba(255, 255, 255, 0.85);
-    padding: 10px;
-    border-radius: 4px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    display: flex;
-    flex-direction: column;
-    gap: 15px;
-    max-width: 250px;
-}
+/* Remove duplicated .deckOverlayControls rule */
 
 /* Add other existing rules if needed for context */
 .legendContainer {
     /* styles */
+    width: 100%; /* Ensure legend container takes full width */
+    display: flex;
+    flex-direction: column;
+    gap: 10px; /* Space between general legend items and control groups */
 }
 
 .controlGroup {
     /* styles */
+    width: 100%; /* Ensure control groups take full width */
+    margin-bottom: 12px; /* Add space below each control group */
+}
+.controlGroup:last-child {
+    margin-bottom: 0;
+}
+
+.controlGroup label, .controlGroup span { /* Style labels and text within groups */
+    display: block; /* Make labels block elements */
+    font-size: 0.9em;
+    font-weight: 600; /* Make labels slightly bolder */
+    color: #475569; /* Cool Gray 600 */
+    margin-bottom: 6px; /* Space below label */
+}
+
+.radioGroup { /* Style radio button groups */
+    display: flex;
+    gap: 10px; /* Space between radio buttons */
+    align-items: center;
+    margin-left: 5px; /* Indent radio buttons slightly */
+}
+
+.radioGroup label { /* Style labels for radio buttons */
+    font-weight: 500; /* Normal weight for radio options */
+    font-size: 0.85em;
+    margin-bottom: 0; /* Remove bottom margin for radio labels */
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    color: #334155; /* Cool Gray 700 */
+}
+
+.radioGroup input[type="radio"] {
+    margin-right: 5px;
+    accent-color: #2563eb; /* Blue 600 */
 }
 
 .fullscreenButton {
@@ -261,89 +294,109 @@
 
 /* --- ADDED: Layer Control Styles (similar to SpatialOverview) --- */
 .controlSection {
-    background-color: rgba(50, 50, 50, 0.8);
-    padding: 8px 12px;
-    border-radius: 4px;
-    margin-bottom: 10px; /* Add some space between control sections */
-    max-height: 200px; /* Limit height */
-    overflow-y: auto;  /* Add scroll if needed */
+    /* background-color: rgba(50, 50, 50, 0.8); */ /* Removed dark background */
+    padding: 12px 0 0 0; /* Add padding top, remove others */
+    border-radius: 0; /* Remove border radius */
+    margin-bottom: 0; /* Remove margin bottom */
+    margin-top: 12px; /* Add margin top for separation */
+    border-top: 1px solid #e2e8f0; /* Cool Gray 200 separator line */
+    /* max-height: 200px; */ /* Removed max-height */
+    /* overflow-y: auto; */  /* Removed scroll */
+    width: 100%; /* Ensure it takes full width */
 }
 
 .controlSection h4 {
     margin-top: 0;
-    margin-bottom: 8px;
+    margin-bottom: 10px; /* Increased space below title */
     font-size: 0.9em;
-    color: #eee;
-    border-bottom: 1px solid #666;
-    padding-bottom: 4px;
+    /* color: #eee; */ /* Changed color */
+    color: #475569; /* Cool Gray 600 */
+    font-weight: 600; /* Make it bolder */
+    /* border-bottom: 1px solid #666; */ /* Removed border */
+    padding-bottom: 0; /* Remove padding */
+    text-transform: uppercase; /* Match other titles */
+    letter-spacing: 0.05em; /* Match other titles */
 }
 
 .layerHeader {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 5px; /* Space between header and list */
+    margin-bottom: 8px; /* Increased space between header and list */
 }
 
 .masterLayerToggle {
-    padding: 2px 6px;
+    padding: 3px 8px; /* Adjusted padding */
     font-size: 0.8em;
-    background-color: #555;
-    color: #eee;
-    border: 1px solid #777;
-    border-radius: 3px;
+    /* background-color: #555; */
+    background-color: #f1f5f9; /* Cool Gray 100 background */
+    /* color: #eee; */
+    color: #475569; /* Cool Gray 600 text */
+    /* border: 1px solid #777; */
+    border: 1px solid #cbd5e1; /* Cool Gray 300 border */
+    border-radius: 4px; /* Slightly rounder */
     cursor: pointer;
-    transition: background-color 0.2s;
+    transition: background-color 0.2s, border-color 0.2s;
 }
 
 .masterLayerToggle:hover {
-    background-color: #666;
+    /* background-color: #666; */
+    background-color: #e2e8f0; /* Cool Gray 200 */
+    border-color: #94a3b8; /* Cool Gray 400 */
 }
 
 .masterLayerToggle:disabled {
-    background-color: #444;
-    color: #888;
+    /* background-color: #444; */
+    background-color: #e2e8f0; /* Cool Gray 200 */
+    /* color: #888; */
+    color: #94a3b8; /* Cool Gray 400 */
     cursor: not-allowed;
+    border-color: #e2e8f0; /* Cool Gray 200 */
 }
 
 .layerLegendContainer {
     display: flex;
     flex-direction: column; /* Stack items vertically */
-    gap: 4px; /* Space between layer items */
-    max-height: 150px; /* Limit height before scrolling */
-    overflow-y: auto;  /* Enable vertical scroll */
+    gap: 6px; /* Increased space between layer items */
+    /* max-height: 150px; */ /* Removed max-height */
+    /* overflow-y: auto; */  /* Removed vertical scroll */
+    /* padding-right: 5px; */ /* Removed padding for scrollbar */
 }
 
 .layerControlItem {
     display: flex;
     align-items: center;
     cursor: pointer;
-    padding: 3px 5px;
+    padding: 4px 6px; /* Adjusted padding */
     border-radius: 3px;
     transition: background-color 0.1s ease-in-out;
 }
 
 .layerControlItem:hover {
-    background-color: rgba(255, 255, 255, 0.1);
+    /* background-color: rgba(255, 255, 255, 0.1); */
+    background-color: #f8fafc; /* Cool Gray 50 on hover */
 }
 
 .layerToggleCheckbox {
-    margin-right: 6px;
+    margin-right: 8px; /* Increased space */
     pointer-events: none; /* Prevent direct interaction, handled by parent div click */
+    accent-color: #2563eb; /* Blue 600 */
 }
 
 .legendColorSwatch {
     width: 12px;
     height: 12px;
     border-radius: 2px;
-    margin-right: 6px;
-    border: 1px solid rgba(255, 255, 255, 0.3);
+    margin-right: 8px; /* Increased space */
+    /* border: 1px solid rgba(255, 255, 255, 0.3); */
+    border: 1px solid #cbd5e1; /* Cool Gray 300 */
     display: inline-block; /* Needed for background color */
 }
 
 .layerNameText {
     font-size: 0.85em;
-    color: #ddd;
+    /* color: #ddd; */
+    color: #334155; /* Cool Gray 700 */
     white-space: nowrap; /* Prevent wrapping */
     overflow: hidden;
     text-overflow: ellipsis; /* Add ellipsis if name is too long */
@@ -354,3 +407,10 @@
 /* --- End Added Layer Control Styles --- */
 
 /* Rename file to frontend/src/components/InteractionVisualization/InteractionVisualization.module.css */ 
+
+/* --- ADDED: Override for Fullscreen --- */
+.fullscreen .deckOverlayControls {
+  max-height: calc(100vh - 32px); /* Allow more height in fullscreen, relative to viewport */
+  overflow-y: auto; /* Show scrollbar only if needed in fullscreen */
+}
+/* --- End Override --- */ 
