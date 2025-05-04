@@ -2,7 +2,7 @@
 
 import pandas as pd
 import numpy as np
-from typing import Dict, Any, List, Set
+from typing import Dict, Any, List, Set, Callable
 from sklearn.preprocessing import MinMaxScaler # For pathway dominance normalization
 import time # For placeholder simulation - REMOVE if not needed
 import logging # ADD logging import
@@ -262,6 +262,8 @@ def _calculate_module_context_for_scope(modules_df: pd.DataFrame, pathway_result
     # Ensure gene column is string type for reliable lookup
     try:
          modules_df['gene'] = modules_df['gene'].astype(str)
+         # --- Ensure module IDs are also strings for lookup and results --- 
+         modules_df['module'] = modules_df['module'].astype(str) 
          module_lookup = modules_df.set_index('gene')['module'].to_dict()
     except Exception as e:
         logger.error(f"ERROR creating module lookup: {e}. Check modules file columns ('gene', 'module').")
@@ -345,7 +347,9 @@ async def run_analysis_pipeline_from_dataframes(
     modules_df: pd.DataFrame
 ) -> Dict[str, Dict[str, Any]]:
     """Runs the analysis pipeline stages directly on provided DataFrames for a custom scope."""
-    logger.info("Running Analysis Pipeline from DataFrames (Custom Selection)...")
+    pipeline_start_time = time.time() # DEBUG
+    logger.debug(f"[Custom Analysis Core] Pipeline started for DataFrame with {len(all_spatial_df)} points.") # DEBUG
+
     scope_name = "custom_selection" # Define the scope name for results
     final_results = {scope_name: {}}
 
@@ -354,31 +358,129 @@ async def run_analysis_pipeline_from_dataframes(
 
     try:
         # 1. Calculate Counts
-        logger.info(f"  Calculating counts for {scope_name}...")
+        counts_start_time = time.time() # DEBUG
+        logger.debug(f"[Custom Analysis Core] Calculating counts for {scope_name}...") # DEBUG
         count_results = _calculate_lr_counts_for_scope(all_spatial_df, interactions_df)
         final_results[scope_name]['ligand_receptor_counts'] = count_results
-        logger.info(f"  Counts complete for {scope_name}.")
+        logger.debug(f"[Custom Analysis Core] Counts duration: {time.time() - counts_start_time:.4f} seconds.") # DEBUG
 
         # 2. Calculate Pathway Dominance
-        logger.info(f"  Calculating pathway dominance for {scope_name}...")
+        pathway_start_time = time.time() # DEBUG
+        logger.debug(f"[Custom Analysis Core] Calculating pathway dominance for {scope_name}...") # DEBUG
         pathway_results_list = _calculate_pathway_dominance_for_scope(all_spatial_df, interactions_df)
         final_results[scope_name]['pathway_dominance'] = pathway_results_list
-        logger.info(f"  Pathway dominance complete for {scope_name}.")
+        logger.debug(f"[Custom Analysis Core] Pathway dominance duration: {time.time() - pathway_start_time:.4f} seconds.") # DEBUG
 
         # 3. Calculate Module Context
-        logger.info(f"  Calculating module context for {scope_name}...")
+        module_start_time = time.time() # DEBUG
+        logger.debug(f"[Custom Analysis Core] Calculating module context for {scope_name}...") # DEBUG
         # Pass the pathway results calculated for this specific scope
         module_context_list = _calculate_module_context_for_scope(modules_df, pathway_results_list)
         final_results[scope_name]['module_context'] = module_context_list
-        logger.info(f"  Module context complete for {scope_name}.")
+        logger.debug(f"[Custom Analysis Core] Module context duration: {time.time() - module_start_time:.4f} seconds.") # DEBUG
 
-        logger.info(f"Analysis Pipeline from DataFrames Complete for {scope_name}.")
+        logger.debug(f"[Custom Analysis Core] Pipeline finished successfully. Total duration: {time.time() - pipeline_start_time:.4f} seconds.") # DEBUG
         return final_results
 
     except Exception as e:
         # Log the specific error from the pipeline stage
         logger.exception(f"ERROR during analysis pipeline from DataFrames for {scope_name}: {e}")
+        logger.debug(f"[Custom Analysis Core] Pipeline failed after {time.time() - pipeline_start_time:.4f} seconds.") # DEBUG
         # Re-raise the exception so the service layer can catch it and update job status
         raise e 
+
+# --- Make sure analysis_logic/__init__.py exports the new function --- 
+
+# --- NEW: Standardized Full Pipeline ---
+
+async def run_full_analysis_pipeline(
+    spatial_df: pd.DataFrame, 
+    interactions_df: pd.DataFrame, 
+    modules_df: pd.DataFrame,
+    update_progress: Callable = None # Optional progress callback
+) -> Dict[str, Dict[str, Any]]:
+    """Runs the full analysis pipeline (counts, pathway, module context) 
+       for whole tissue and each layer directly on provided DataFrames."""
+    logger.info("Running Full Analysis Pipeline from DataFrames...")
+    final_results = {} # Results keyed by scope (whole_tissue, layer_1, ...)
+
+    # --- Determine Scopes ---
+    if 'layer' not in spatial_df.columns:
+        logger.warning("'layer' column not found in spatial data. Running analysis only for 'whole_tissue'.")
+        scopes = ['whole_tissue']
+    else:
+        try:
+            # Ensure layers are strings for consistent keys
+            spatial_df['layer'] = spatial_df['layer'].astype(str) 
+            layers = list(spatial_df['layer'].unique())
+        except Exception as e:
+            logger.error(f"Error converting layer names to string: {e}. Proceeding with original layer types.")
+            layers = list(spatial_df['layer'].unique())
+        scopes = ['whole_tissue'] + [str(l) for l in layers] # Ensure string keys
+
+    total_scopes = len(scopes)
+    processed_scopes = 0
+
+    # --- Iterate through Scopes ---
+    for scope in scopes:
+        logger.info(f"  Processing Scope: {scope} ({processed_scopes + 1}/{total_scopes})")
+        final_results[scope] = {}
+        
+        try:
+            # --- Get Spatial Subset for Scope ---
+            if scope == 'whole_tissue':
+                subset_spatial_df = spatial_df
+            else:
+                # Use original layer column for filtering if conversion failed, otherwise use string
+                layer_col_type = spatial_df['layer'].dtype
+                filter_scope = scope if layer_col_type == object or layer_col_type == str else spatial_df['layer'].unique()[scopes.index(scope)-1] # Attempt recovery if not string
+                subset_spatial_df = spatial_df[spatial_df['layer'] == filter_scope] 
+
+            if subset_spatial_df.empty:
+                logger.warning(f"    Skipping empty scope: {scope}")
+                final_results[scope] = {
+                    'ligand_receptor_counts': {"unique_ligands": 0, "unique_receptors": 0},
+                    'pathway_dominance': [],
+                    'module_context': []
+                }
+                processed_scopes += 1
+                if update_progress: await update_progress(stage_id="analysis", progress=(processed_scopes / total_scopes), current_scope=scope, detail="Scope empty")
+                continue
+
+            # --- Stage 1: Calculate Counts ---
+            logger.info(f"    Calculating counts for {scope}...")
+            count_results = _calculate_lr_counts_for_scope(subset_spatial_df, interactions_df)
+            final_results[scope]['ligand_receptor_counts'] = count_results
+            logger.info(f"    Counts complete for {scope}.")
+            if update_progress: await update_progress(stage_id="counts_analysis", progress=(processed_scopes + 0.33) / total_scopes, current_scope=scope)
+
+            # --- Stage 2: Calculate Pathway Dominance ---
+            logger.info(f"    Calculating pathway dominance for {scope}...")
+            pathway_results_list = _calculate_pathway_dominance_for_scope(subset_spatial_df, interactions_df)
+            final_results[scope]['pathway_dominance'] = pathway_results_list
+            logger.info(f"    Pathway dominance complete for {scope}.")
+            if update_progress: await update_progress(stage_id="pathway_dominance", progress=(processed_scopes + 0.66) / total_scopes, current_scope=scope)
+
+            # --- Stage 3: Calculate Module Context ---
+            logger.info(f"    Calculating module context for {scope}...")
+            # Module context uses the pathway results just calculated for this scope
+            module_context_list = _calculate_module_context_for_scope(modules_df, pathway_results_list)
+            final_results[scope]['module_context'] = module_context_list
+            logger.info(f"    Module context complete for {scope}.")
+            if update_progress: await update_progress(stage_id="module_context", progress=(processed_scopes + 1.0) / total_scopes, current_scope=scope)
+
+        except Exception as e:
+            logger.exception(f"    ERROR processing scope {scope}: {e}")
+            # Store partial results if available, mark error
+            final_results[scope]['error'] = str(e) 
+            # Ensure keys exist even on error
+            final_results[scope].setdefault('ligand_receptor_counts', {"unique_ligands": -1, "unique_receptors": -1})
+            final_results[scope].setdefault('pathway_dominance', [])
+            final_results[scope].setdefault('module_context', [])
+
+        processed_scopes += 1
+        
+    logger.info("Full Analysis Pipeline from DataFrames Complete.")
+    return final_results
 
 # --- Make sure analysis_logic/__init__.py exports the new function --- 

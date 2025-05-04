@@ -60,6 +60,8 @@ class JobService:
         progress: Optional[float] = None,
         message: Optional[str] = None,
         results: Optional[Dict[str, Any]] = None,
+        stage_id: Optional[str] = None,
+        current_scope: Optional[str] = None
     ):
         """
         Updates the status, progress, message, and results for a given job.
@@ -71,6 +73,8 @@ class JobService:
             progress: The completion progress (0.0 to 1.0).
             message: A descriptive message about the current status.
             results: A dictionary containing the final results of the job (if completed).
+            stage_id: Optional stage ID for the job.
+            current_scope: Optional current scope for the job.
         """
         if not self.job_exists(job_id):
             print(f"JobService: Attempted to update non-existent job {job_id}")
@@ -86,6 +90,10 @@ class JobService:
             current_status["message"] = message
         if results is not None:
             current_status["results"] = results # Store full results
+        if stage_id is not None:
+            current_status["stage_id"] = stage_id
+        if current_scope is not None:
+            current_status["current_scope"] = current_scope
 
         # Create a summary for logging (exclude results)
         log_summary = {
