@@ -2,9 +2,9 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { SharedDataStore, useSharedData, DataRequestOptions } from '../services/data/SharedDataStore';
 
 // Type for the data returned by the /api/visualization endpoint
-interface InteractionVisualizationData {
-  ligand: { x: number; y: number }[];
-  receptor: { x: number; y: number }[];
+export interface InteractionVisualizationData {
+  ligand: { x: number; y: number; layer: string }[];
+  receptor: { x: number; y: number; layer: string }[];
   warnings?: string[];
 }
 
@@ -85,7 +85,7 @@ const useInteractionData = (
                 ligand,
                 receptor,
                 layer: apiScopeName ?? undefined, // Pass undefined if apiScopeName is null
-                polygon: lassoCoords, // ADDED: Pass lasso coordinates
+                polygon: lassoCoords || undefined, // MODIFIED: Pass undefined if lassoCoords is null
             };
             
             // Create a URL for logging purposes only

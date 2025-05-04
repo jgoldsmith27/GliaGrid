@@ -259,4 +259,98 @@
     /* styles */
 }
 
+/* --- ADDED: Layer Control Styles (similar to SpatialOverview) --- */
+.controlSection {
+    background-color: rgba(50, 50, 50, 0.8);
+    padding: 8px 12px;
+    border-radius: 4px;
+    margin-bottom: 10px; /* Add some space between control sections */
+    max-height: 200px; /* Limit height */
+    overflow-y: auto;  /* Add scroll if needed */
+}
+
+.controlSection h4 {
+    margin-top: 0;
+    margin-bottom: 8px;
+    font-size: 0.9em;
+    color: #eee;
+    border-bottom: 1px solid #666;
+    padding-bottom: 4px;
+}
+
+.layerHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 5px; /* Space between header and list */
+}
+
+.masterLayerToggle {
+    padding: 2px 6px;
+    font-size: 0.8em;
+    background-color: #555;
+    color: #eee;
+    border: 1px solid #777;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.masterLayerToggle:hover {
+    background-color: #666;
+}
+
+.masterLayerToggle:disabled {
+    background-color: #444;
+    color: #888;
+    cursor: not-allowed;
+}
+
+.layerLegendContainer {
+    display: flex;
+    flex-direction: column; /* Stack items vertically */
+    gap: 4px; /* Space between layer items */
+    max-height: 150px; /* Limit height before scrolling */
+    overflow-y: auto;  /* Enable vertical scroll */
+}
+
+.layerControlItem {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    padding: 3px 5px;
+    border-radius: 3px;
+    transition: background-color 0.1s ease-in-out;
+}
+
+.layerControlItem:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.layerToggleCheckbox {
+    margin-right: 6px;
+    pointer-events: none; /* Prevent direct interaction, handled by parent div click */
+}
+
+.legendColorSwatch {
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    margin-right: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    display: inline-block; /* Needed for background color */
+}
+
+.layerNameText {
+    font-size: 0.85em;
+    color: #ddd;
+    white-space: nowrap; /* Prevent wrapping */
+    overflow: hidden;
+    text-overflow: ellipsis; /* Add ellipsis if name is too long */
+    flex-grow: 1; /* Allow text to take remaining space */
+}
+
+
+/* --- End Added Layer Control Styles --- */
+
 /* Rename file to frontend/src/components/InteractionVisualization/InteractionVisualization.module.css */ 

@@ -13,8 +13,9 @@ import {
 import useJobStatus from '../../hooks/useJobStatus';
 // Import the spatial visualization component
 import SpatialOverviewVisualization from '../../components/SpatialOverviewVisualization/SpatialOverviewVisualization';
-// Import the hook for spatial stream data - REMOVED
-// import { useSpatialStreamData } from '../../services/data/SharedDataStore';
+// ADDED: Import types/hooks needed for decoupled viz fetch
+import { SharedDataStore, useSharedData, DataRequestOptions } from '../../services/data/SharedDataStore';
+import { InteractionVisualizationData } from '../../hooks/useInteractionData'; // Assuming type is exported
 
 // Define the structure for combined data used in tables/visualizations
 export interface CombinedInteractionData extends Partial<PathwayDominanceResult>, Partial<ModuleContextResult> {
@@ -39,6 +40,9 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
   // Use the event-driven hook to manage job status
   const { jobStatus, isLoading: isJobStatusLoading, error: jobStatusError, refreshStatus } = useJobStatus(jobId);
   
+  // ADDED: Extract boundaries directly here
+  const layerBoundaries = jobStatus?.results?.outputs?.layer_boundaries;
+  
   // --- Get Spatial Stream State from SharedDataStore --- REMOVED ---
   // const { 
   //   points: spatialPoints, 
@@ -51,7 +55,7 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
   // const [currentTab, setCurrentTab] = useState<ResultsTab>('Summary'); // Removed
   const [selectedScope, setSelectedScope] = useState<ScopeType>('whole_tissue');
   const [availableLayers, setAvailableLayers] = useState<string[]>([]);
-  const [selectedLayers, setSelectedLayers] = useState<string[]>([]); 
+  const [selectedLayer, setSelectedLayer] = useState<string | null>(null);
   const [selectedPair, setSelectedPair] = useState<[string, string] | null>(null);
   const [combinedAnalysisData, setCombinedAnalysisData] = useState<CombinedInteractionData[]>([]);
   const [lassoCoords, setLassoCoords] = useState<[number, number][] | null>(null); // ADDED state for lasso coords
@@ -68,6 +72,15 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
   // const [spatialError, setSpatialError] = useState<string | null>(null);
   // const [spatialPointsReceived, setSpatialPointsReceived] = useState<number>(0);
 
+  // ADDED: State for the currently displayed visualization
+  const [displayedVizPair, setDisplayedVizPair] = useState<[string, string] | null>(null);
+  const [displayedVizData, setDisplayedVizData] = useState<InteractionVisualizationData | null>(null);
+  const [isLoadingDisplayedViz, setIsLoadingDisplayedViz] = useState(false);
+  const [displayedVizError, setDisplayedVizError] = useState<string | null>(null);
+
+  // ADDED: Get data store instance
+  const dataStore = useSharedData();
+
   // Effect to extract available layers from jobStatus (updated from hook)
   useEffect(() => {
       // Access results from the 'outputs' field
@@ -82,19 +95,27 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
 
   // Effect to ensure a layer is selected when in 'layers' scope
   useEffect(() => {
-    // Use the derived availableLayers state
-    if (selectedScope === 'layers' && 
-        (selectedLayers.length === 0 || !availableLayers.includes(selectedLayers[0]))) {
-      if (availableLayers.length > 0) {
-        setSelectedLayers([availableLayers[0]]);
+    // MODIFIED: Logic for single selectedLayer
+    if (selectedScope === 'layers') {
+      // If no layer is selected OR the selected layer isn't available anymore
+      if (!selectedLayer || !availableLayers.includes(selectedLayer)) {
+        // Select the first available layer, or null if none exist
+        setSelectedLayer(availableLayers.length > 0 ? availableLayers[0] : null);
       }
+    } else {
+       // Clear selected layer if not in layers scope
+       if (selectedLayer !== null) {
+           setSelectedLayer(null);
+       }
     }
-  }, [selectedScope, availableLayers, selectedLayers]); // Depend on derived layers
+  }, [selectedScope, availableLayers, selectedLayer]); // MODIFIED dependencies
 
   // --- Effect to Process Results and Combine Data ---
   useEffect(() => {
-      // Access results from the 'outputs' field
       const outputs = jobStatus?.results?.outputs;
+      // MODIFIED: Log selectedLayer
+      console.log(`[ResultsPage] Processing results. Scope: ${selectedScope}, Selected Layer: ${selectedLayer}, Outputs available: ${!!outputs}`);
+      
       if (!jobStatus || !outputs) { 
           setCombinedAnalysisData([]);
           setSelectedPair(null);
@@ -104,8 +125,11 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
       let scopeData: any = null;
       if (selectedScope === 'whole_tissue') {
           scopeData = outputs.whole_tissue;
-      } else if (selectedScope === 'layers' && selectedLayers.length > 0) {
-          scopeData = outputs[selectedLayers[0]];
+      } else if (selectedScope === 'layers' && selectedLayer) { // MODIFIED: Check selectedLayer
+          const layerKey = selectedLayer;
+          console.log(`[ResultsPage] Accessing layer data for key: ${layerKey}`);
+          scopeData = outputs[layerKey];
+          console.log(`[ResultsPage] Retrieved scopeData for layer ${layerKey}:`, scopeData ? 'Data found' : 'Data NOT found', scopeData);
       } else if (selectedScope === 'custom') {
           // Custom scope doesn't rely on combined data from results in the same way
           setCombinedAnalysisData([]);
@@ -114,7 +138,8 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
       }
 
       if (!scopeData || !scopeData.pathway_dominance || !scopeData.module_context) {
-          console.warn("Missing pathway_dominance or module_context data for scope:", selectedScope, selectedLayers[0]);
+          // MODIFIED: Log selectedLayer
+          console.warn(`[ResultsPage] Data structure invalid or missing for scope: ${selectedScope}, Layer Key: ${selectedLayer}. Setting empty table data.`, scopeData);
           setCombinedAnalysisData([]);
           setSelectedPair(null);
           return;
@@ -146,6 +171,8 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
           };
       });
 
+      // ADDED log here
+      console.log(`[ResultsPage] Setting combinedAnalysisData with ${combined.length} rows for scope ${selectedScope}${selectedLayer ? ` (${selectedLayer})` : ''}.`);
       setCombinedAnalysisData(combined);
       
       // If the currently selected pair is no longer in the combined data (e.g., scope changed), reset it
@@ -157,16 +184,84 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
           setSelectedPair(null);
       }
       
-  }, [jobStatus, selectedScope, selectedLayers]); // Re-run when results or scope change
+  }, [jobStatus, selectedScope, selectedLayer]); // MODIFIED: Depend on selectedLayer
 
   // --- Effect to Stream Spatial Data for Overview ---
   // REMOVED - Streaming is initiated from DataInputPage and managed by SharedDataStore
   // useEffect(() => { ... }, [...]); 
 
-  const handleSelectPair = useCallback((pair: [string, string] | null) => {
-    console.log("[ResultsPage] Setting selected pair:", pair);
-    setSelectedPair(pair);
-  }, []);
+  // Determine scopeForApi (needed for handleSelectPair)
+  const scopeForApi = 
+      selectedScope === 'layers' 
+          ? selectedLayer // Pass the selected layer string or null
+      : selectedScope === 'custom' 
+          ? null // Pass null for custom scope, viz fetch handled differently? Check custom logic
+          : 'whole_tissue'; // Default to whole_tissue for that scope
+
+  // MODIFIED: handleSelectPair triggers viz fetch
+  const handleSelectPair = useCallback(async (pair: [string, string] | null) => {
+    if (!pair) {
+        console.log("[ResultsPage] Pair deselected.");
+        // Optionally clear visualization state if needed, or just keep last state
+        // For now, let's just log and not clear the viz
+        return;
+    }
+
+    const currentScopeForViz = scopeForApi; 
+
+    // Check if we should fetch (only for valid scopes and jobId)
+    if (!jobId || currentScopeForViz === null) { 
+         console.log(`[ResultsPage] Skipping visualization fetch. Scope is null or no JobId.`);
+         setDisplayedVizPair(pair); // Update the intended pair
+         setDisplayedVizData(null); // Clear data as we didn't fetch
+         setIsLoadingDisplayedViz(false);
+         setDisplayedVizError('Select a valid scope (Whole Tissue or a specific Layer) to visualize interactions.'); // Inform user
+         return;
+    }
+    // Skip fetch if scope is custom - custom viz uses different data source/trigger
+    if (selectedScope === 'custom') {
+         console.log(`[ResultsPage] Skipping visualization fetch for custom scope.`);
+         setDisplayedVizPair(pair); 
+         setDisplayedVizData(null); 
+         setIsLoadingDisplayedViz(false);
+         // Error message for custom scope might be different or handled elsewhere
+         setDisplayedVizError('Visualization for custom scope loads with custom analysis results.'); 
+         return;
+    }
+
+    console.log(`[ResultsPage] Triggering viz fetch for pair: ${pair.join('-')}, scope: ${currentScopeForViz}`);
+    setDisplayedVizPair(pair);
+    setIsLoadingDisplayedViz(true);
+    setDisplayedVizData(null); 
+    setDisplayedVizError(null);
+
+    try {
+        const options: DataRequestOptions = {
+            ligand: pair[0],
+            receptor: pair[1],
+            layer: currentScopeForViz ?? undefined, 
+            // polygon: lassoCoords || undefined, // Uncomment if lasso should filter viz fetch
+        };
+        
+        // Use dataStore directly to fetch interaction points
+        const data = await dataStore.requestData(jobId, 'interactionPoints', options);
+
+        console.log("[ResultsPage] Viz fetch success:", data);
+        // TODO: Ensure the fetched 'data' matches InteractionVisualizationData structure
+        // If the fetched data structure is different, adapt it here.
+        setDisplayedVizData(data as InteractionVisualizationData); // Potential type assertion needed
+        // Handle warnings if necessary: setDisplayedVizWarnings(data.warnings || []);
+        setDisplayedVizError(null);
+
+    } catch (error) {
+        console.error("[ResultsPage] Viz fetch error:", error);
+        setDisplayedVizError(error instanceof Error ? error.message : String(error));
+        setDisplayedVizData(null);
+    } finally {
+        setIsLoadingDisplayedViz(false);
+    }
+    // MODIFIED dependencies - needs scopeForApi', selectedScope instead of just scopeForApi? Let's use selectedLayer/selectedScope
+  }, [jobId, selectedScope, selectedLayer, dataStore]); 
 
   const handleLassoSelect = useCallback((coords: [number, number][] | null) => {
     console.log("[ResultsPage] Lasso selection coords:", coords);
@@ -231,25 +326,45 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
   const handleScopeChange = useCallback((scope: ScopeType) => {
     console.log("[ResultsPage] Scope changed to:", scope);
     setSelectedScope(scope);
-    // Clear custom analysis state when changing scope
+    // Clear custom analysis state
     setLassoCoords(null);
     setCustomAnalysisResults(null);
     setCustomAnalysisError(null);
     setIsLoadingCustomAnalysis(false);
 
-    if (scope === 'whole_tissue') {
-        setSelectedLayers([]);
-    } else if (scope === 'custom') {
-        setSelectedLayers([]);
-        setSelectedPair(null); 
+    // Clear layer selection if needed
+    if (scope !== 'layers') {
+        setSelectedLayer(null);
     }
+    // Clear custom scope pair selection
+    if (scope === 'custom') {
+       // setSelectedPair(null); // Removed, table selection not directly tied here
+    }
+    // *** ADDED: Clear visualization state on scope change ***
+    setDisplayedVizPair(null);
+    setDisplayedVizData(null);
+    setIsLoadingDisplayedViz(false);
+    setDisplayedVizError(null);
+
   }, []);
 
-  const handleLayersChange = useCallback((layers: string[]) => {
-    setSelectedLayers(layers);
+  // MODIFIED: Simplified handler for single layer change
+  const handleLayerChange = useCallback((layer: string | null) => {
+    setSelectedLayer(layer);
+    // ADDED: Clear visualization when layer changes
+    setDisplayedVizPair(null);
+    setDisplayedVizData(null);
+    setIsLoadingDisplayedViz(false);
+    setDisplayedVizError(null);
   }, []);
 
   // --- UI Rendering --- 
+
+  // ADDED: Define table loading state
+  // Considered loading if job is loading AND we don't have results yet,
+  // OR if we are in layers scope but haven't determined the specific layer data yet.
+  const isTableDataLoading = (isJobStatusLoading && !jobStatus?.results?.outputs) || 
+                             (selectedScope === 'layers' && !selectedLayer && availableLayers.length > 0); // Add other conditions if needed
 
   // Display initial loading message
   if (isJobStatusLoading && !jobStatus) {
@@ -301,14 +416,6 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
   // We have successful results here
   // const results = jobStatus.results; // Keep results accessible if needed
 
-  // Determine which layer name to pass to SummaryTabContent for API calls
-  // For custom scope, we don't need a specific layer name for the interaction fetch (it won't run)
-  // For layer scope, use the first selected layer.
-  // For whole_tissue, use 'whole_tissue' (or whatever the API expects).
-  const scopeForApi = selectedScope === 'layers' && selectedLayers.length > 0 
-                      ? selectedLayers[0] 
-                      : selectedScope; // Fallback to 'whole_tissue' or 'custom'
-
   // --- Render Main Layout --- 
   console.log("[ResultsPage] Passing onAnalyzeSelection:", typeof handleAnalyzeLasso); // LOGGING
   return (
@@ -330,13 +437,13 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
             <div className={styles.layerSelectorContainer}> {/* Wrapper Div */} 
                 <LayerSelector 
                     availableLayers={availableLayers} 
-                    selectedLayers={selectedLayers} 
-                    onLayersChange={handleLayersChange} 
+                    // MODIFIED: Adapt single layer state to expected props
+                    selectedLayers={selectedLayer ? [selectedLayer] : []} 
+                    onLayersChange={(newLayers: string[]) => {
+                        // Extract first layer or null and call our single-layer handler
+                        handleLayerChange(newLayers.length > 0 ? newLayers[0] : null);
+                    }} 
                 />
-                {/* Keep warning inside the container if relevant */} 
-                {selectedLayers.length > 1 && (
-                    <p className={styles.warning}>Warning: Multiple layers selected, analysis uses only the first ({selectedLayers[0]}).</p>
-                )}
             </div>
         )}
         
@@ -371,18 +478,23 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
                            <SummaryTabContent 
                                 jobId={jobId || ''} 
                                 combinedData={[]} // Pass empty for original data
-                                selectedPair={selectedPair}
                                 onSelectPair={handleSelectPair}
                                 apiScopeName={null} // No API scope for custom results display
                                 currentScope={selectedScope} 
                                 // Pass custom analysis state and handlers
                                 customAnalysisResults={customAnalysisResults} 
-                                isLoadingCustomAnalysis={false} // Already handled loading above
-                                customAnalysisError={null} // Already handled error above
+                                isLoadingCustomAnalysis={isLoadingCustomAnalysis}
+                                customAnalysisError={customAnalysisError}
                                 // ADDED: Pass aggregation state and setter
                                 customAggregationLevel={customAggregationLevel}
                                 setCustomAggregationLevel={setCustomAggregationLevel}
                                 lassoCoords={lassoCoords} // ADDED: Pass lassoCoords
+                                layerBoundaries={layerBoundaries}
+                                isTableDataLoading={false} // Table data isn't loading from jobStatus here
+                                displayedVizPair={displayedVizPair}
+                                displayedVizData={displayedVizData}
+                                isLoadingDisplayedViz={isLoadingDisplayedViz}
+                                displayedVizError={displayedVizError}
                             />
                       ) : (
                           // Initial state before analysis is run
@@ -396,21 +508,25 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
                   <SummaryTabContent 
                         jobId={jobId || ''} 
                         combinedData={combinedAnalysisData}
-                        selectedPair={selectedPair}
                         onSelectPair={handleSelectPair}
-                        apiScopeName={scopeForApi} 
+                        apiScopeName={scopeForApi}
                         currentScope={selectedScope} 
-                        // Pass lasso/analyze handlers only for non-custom scopes implicitly via SummaryTab
-                        // onLassoSelect={handleLassoSelect} // Removed, SummaryTab doesn't need it directly?
-                        // onAnalyzeSelection={handleAnalyzeLasso} // Removed, SummaryTab doesn't trigger this
                         // Pass null for custom state when not in custom scope
                         customAnalysisResults={null} 
-                        isLoadingCustomAnalysis={false} 
-                        customAnalysisError={null} 
+                        // Pass calculated table loading state
+                        isTableDataLoading={isTableDataLoading}
+                        // REMOVED: isLoadingCustomAnalysis/customAnalysisError (use table loading)
+                        customAnalysisError={null}
                         // ADDED: Pass aggregation state and setter (even if null/default)
                         customAggregationLevel={customAggregationLevel} 
                         setCustomAggregationLevel={setCustomAggregationLevel}
                         lassoCoords={null} // ADDED: Pass null lassoCoords for non-custom scopes
+                        layerBoundaries={layerBoundaries}
+                        // ADDED: Pass decoupled viz state
+                        displayedVizPair={displayedVizPair}
+                        displayedVizData={displayedVizData}
+                        isLoadingDisplayedViz={isLoadingDisplayedViz}
+                        displayedVizError={displayedVizError}
                     />
               </div>
           )}
