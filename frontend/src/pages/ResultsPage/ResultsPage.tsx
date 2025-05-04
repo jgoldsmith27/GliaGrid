@@ -198,70 +198,71 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
           ? null // Pass null for custom scope, viz fetch handled differently? Check custom logic
           : 'whole_tissue'; // Default to whole_tissue for that scope
 
-  // MODIFIED: handleSelectPair triggers viz fetch
+  // MODIFIED: handleSelectPair triggers viz fetch for non-custom scopes
   const handleSelectPair = useCallback(async (pair: [string, string] | null) => {
+    // Update the pair state regardless of scope (so UI reflects selection)
+    setDisplayedVizPair(pair);
+
     if (!pair) {
         console.log("[ResultsPage] Pair deselected.");
-        // Optionally clear visualization state if needed, or just keep last state
-        // For now, let's just log and not clear the viz
+        // Decide if clearing the viz is desired on deselect
+        // setDisplayedVizData(null);
+        // setIsLoadingDisplayedViz(false);
+        // setDisplayedVizError(null);
         return;
     }
 
-    const currentScopeForViz = scopeForApi; 
-
-    // Check if we should fetch (only for valid scopes and jobId)
-    if (!jobId || currentScopeForViz === null) { 
-         console.log(`[ResultsPage] Skipping visualization fetch. Scope is null or no JobId.`);
-         setDisplayedVizPair(pair); // Update the intended pair
-         setDisplayedVizData(null); // Clear data as we didn't fetch
-         setIsLoadingDisplayedViz(false);
-         setDisplayedVizError('Select a valid scope (Whole Tissue or a specific Layer) to visualize interactions.'); // Inform user
-         return;
-    }
-    // Skip fetch if scope is custom - custom viz uses different data source/trigger
+    // Only fetch main viz data if NOT in custom scope
     if (selectedScope === 'custom') {
-         console.log(`[ResultsPage] Skipping visualization fetch for custom scope.`);
-         setDisplayedVizPair(pair); 
-         setDisplayedVizData(null); 
+        console.log("[ResultsPage] In custom scope, skipping main viz fetch.");
+        // Clear main viz state to avoid showing stale data from other scopes
+        setDisplayedVizData(null);
+        setIsLoadingDisplayedViz(false);
+        setDisplayedVizError(null);
+        return;
+    }
+
+    // Determine the scope for the API call (whole_tissue or layer name)
+    const currentScopeForViz = scopeForApi; // Use the calculated scopeForApi
+
+    // Check if we should fetch (valid scope and jobId)
+    if (!jobId || currentScopeForViz === null) {
+         // This case handles 'layers' scope before a layer is selected
+         console.log(`[ResultsPage] Skipping visualization fetch. Scope is null or no JobId.`);
+         setDisplayedVizData(null);
          setIsLoadingDisplayedViz(false);
-         // Error message for custom scope might be different or handled elsewhere
-         setDisplayedVizError('Visualization for custom scope loads with custom analysis results.'); 
+         setDisplayedVizError('Select a specific Layer to visualize interactions.');
          return;
     }
 
-    console.log(`[ResultsPage] Triggering viz fetch for pair: ${pair.join('-')}, scope: ${currentScopeForViz}`);
-    setDisplayedVizPair(pair);
+    // Proceed with fetching for whole_tissue or selected layer
+    console.log(`[ResultsPage] Triggering main viz fetch for pair: ${pair.join('-')}, scope: ${currentScopeForViz}`);
     setIsLoadingDisplayedViz(true);
-    setDisplayedVizData(null); 
+    setDisplayedVizData(null);
     setDisplayedVizError(null);
 
     try {
         const options: DataRequestOptions = {
             ligand: pair[0],
             receptor: pair[1],
-            layer: currentScopeForViz ?? undefined, 
-            // polygon: lassoCoords || undefined, // Uncomment if lasso should filter viz fetch
+            layer: currentScopeForViz ?? undefined,
+            // polygon: lassoCoords || undefined,
         };
         
-        // Use dataStore directly to fetch interaction points
         const data = await dataStore.requestData(jobId, 'interactionPoints', options);
 
-        console.log("[ResultsPage] Viz fetch success:", data);
-        // TODO: Ensure the fetched 'data' matches InteractionVisualizationData structure
-        // If the fetched data structure is different, adapt it here.
-        setDisplayedVizData(data as InteractionVisualizationData); // Potential type assertion needed
-        // Handle warnings if necessary: setDisplayedVizWarnings(data.warnings || []);
+        console.log("[ResultsPage] Main viz fetch success:", data);
+        setDisplayedVizData(data as InteractionVisualizationData);
         setDisplayedVizError(null);
 
     } catch (error) {
-        console.error("[ResultsPage] Viz fetch error:", error);
+        console.error("[ResultsPage] Main viz fetch error:", error);
         setDisplayedVizError(error instanceof Error ? error.message : String(error));
         setDisplayedVizData(null);
     } finally {
         setIsLoadingDisplayedViz(false);
     }
-    // MODIFIED dependencies - needs scopeForApi', selectedScope instead of just scopeForApi? Let's use selectedLayer/selectedScope
-  }, [jobId, selectedScope, selectedLayer, dataStore]); 
+  }, [jobId, selectedScope, selectedLayer, scopeForApi, dataStore]);
 
   const handleLassoSelect = useCallback((coords: [number, number][] | null) => {
     console.log("[ResultsPage] Lasso selection coords:", coords);

@@ -57,6 +57,5 @@ If you encounter issues with large files when cloning or pushing:
 2. If you still have issues, you can download the release version directly from the releases page. 
 
 ### ToDos
-- add layer boundary anotations to regular visualizations
 - Complex receptor visualization support
 - add downstream support for H5AD file handlers in rest of pipeline (they do not work currently)

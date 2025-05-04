@@ -168,6 +168,21 @@ const SummaryTabContent: React.FC<SummaryTabContentProps> = ({
                 return { ...pathwayItem, ...(moduleItem || {}) }; 
             });
 
+            // ADDED BACK: Use interaction hook specifically for custom viz data
+            // Use displayedVizPair from props to know *which* pair to fetch for
+            const scopeForCustomViz = customAggregationLevel === 'custom_by_layer' ? selectedCustomLayer : null;
+            const { 
+                interactionVizData: customVizData, 
+                isLoading: isLoadingCustomViz, 
+                error: customVizError, 
+                cancelFetch: cancelCustomVizFetch 
+            } = useInteractionData(
+                jobId, 
+                displayedVizPair, 
+                scopeForCustomViz, 
+                lassoCoords
+            );
+
             return (
               <>
                 <div className={styles.customAggregationSelector}>
@@ -219,32 +234,32 @@ const SummaryTabContent: React.FC<SummaryTabContentProps> = ({
                           columns={combinedColumns}
                           onRowClick={handleTableRowClick}
                           selectedRowIndex={selectedRowIndex}
-                          loading={isLoadingCustomAnalysis || isLoadingDisplayedViz}
+                          loading={isLoadingCustomAnalysis}
                         />
                       </div>
                       <div className={styles.visualizationArea}>
                         <h3>Interaction Visualization ({displayedVizPair ? displayedVizPair.join('-') : 'Select Pair'})</h3>
-                        {displayedVizError && <p className={styles.errorText}>Viz Error: {displayedVizError}</p>}
-                        {!displayedVizPair && !isLoadingDisplayedViz && <p>Select a pair from the table.</p>}
-                        {displayedVizData && displayedVizPair && (
+                        {customVizError && <p className={styles.errorText}>Viz Error: {customVizError}</p>}
+                        {!displayedVizPair && !isLoadingCustomViz && <p>Select a pair from the table.</p>}
+                        {customVizData && displayedVizPair && (
                             <InteractionVisualization
-                              data={displayedVizData}
-                              ligandName={ligandName}
-                              receptorName={receptorName}
+                              data={customVizData}
+                              ligandName={displayedVizPair[0]}
+                              receptorName={displayedVizPair[1]}
                               currentScope={'whole_tissue'}
-                              isLoading={isLoadingDisplayedViz}
-                              cancelFetch={() => {}}
+                              isLoading={isLoadingCustomViz}
+                              cancelFetch={cancelCustomVizFetch}
                               layerBoundaries={layerBoundaries}
                           />
                         )}
-                        {isLoadingDisplayedViz && (
+                        {isLoadingCustomViz && (
                             <InteractionVisualization
                                 data={{ ligand: [], receptor: [] }}
                                 ligandName="Loading"
                                 receptorName="Loading"
                                 currentScope={'whole_tissue'}
                                 isLoading={true}
-                                cancelFetch={() => {}}
+                                cancelFetch={cancelCustomVizFetch}
                                 layerBoundaries={layerBoundaries}
                             />
                         )}
@@ -261,32 +276,32 @@ const SummaryTabContent: React.FC<SummaryTabContentProps> = ({
                             columns={combinedColumns}
                             onRowClick={handleTableRowClick}
                             selectedRowIndex={selectedRowIndex}
-                            loading={isLoadingCustomAnalysis || isLoadingDisplayedViz}
+                            loading={isLoadingCustomAnalysis}
                           />
                         </div>
                         <div className={styles.visualizationArea}>
                           <h3>Interaction Visualization ({displayedVizPair ? `${displayedVizPair.join('-')} [${selectedCustomLayer}]` : `Select Pair [${selectedCustomLayer}]`})</h3>
-                          {displayedVizError && <p className={styles.errorText}>Viz Error: {displayedVizError}</p>}
-                          {!displayedVizPair && !isLoadingDisplayedViz && <p>Select a pair from the table.</p>}
-                          {displayedVizData && displayedVizPair && (
+                          {customVizError && <p className={styles.errorText}>Viz Error: {customVizError}</p>}
+                          {!displayedVizPair && !isLoadingCustomViz && <p>Select a pair from the table.</p>}
+                          {customVizData && displayedVizPair && (
                               <InteractionVisualization
-                                data={displayedVizData} 
-                                ligandName={ligandName}
-                                receptorName={receptorName}
+                                data={customVizData}
+                                ligandName={displayedVizPair[0]}
+                                receptorName={displayedVizPair[1]}
                                 currentScope={'layers'}
-                                isLoading={isLoadingDisplayedViz}
-                                cancelFetch={() => {}}
+                                isLoading={isLoadingCustomViz}
+                                cancelFetch={cancelCustomVizFetch}
                                 layerBoundaries={layerBoundaries}
                             />
                           )}
-                          {isLoadingDisplayedViz && (
+                          {isLoadingCustomViz && (
                               <InteractionVisualization
                                   data={{ ligand: [], receptor: [] }}
                                   ligandName="Loading"
                                   receptorName="Loading"
                                   currentScope={'layers'}
                                   isLoading={true}
-                                  cancelFetch={() => {}}
+                                  cancelFetch={cancelCustomVizFetch}
                                   layerBoundaries={layerBoundaries}
                               />
                           )}
