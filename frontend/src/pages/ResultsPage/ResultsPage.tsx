@@ -1,11 +1,14 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom'; // Import useParams
 import styles from './ResultsPage.module.css';
 import LoadingSpinner from '../../components/LoadingSpinner/LoadingSpinner';
 import SummaryTabContent from '../../components/ResultsPage/SummaryTabContent'; // New name
 import ScopeSelector, { ScopeType } from '../../components/ScopeSelector/ScopeSelector'; // Import ScopeSelector and its exported type
 import LayerSelector from '../../components/LayerSelector/LayerSelector'; // Assuming this exists
-import { PathwayDominanceResult, ModuleContextResult } from '../../types/analysisResults'; // Import types
+import { 
+    PathwayDominanceResult, ModuleContextResult, 
+    CustomAnalysisResultsBundle 
+} from '../../types/analysisResults'; // Import types
 // Import the new event-driven hook
 import useJobStatus from '../../hooks/useJobStatus';
 // Import the spatial visualization component
@@ -13,24 +16,24 @@ import SpatialOverviewVisualization from '../../components/SpatialOverviewVisual
 // Import the hook for spatial stream data - REMOVED
 // import { useSpatialStreamData } from '../../services/data/SharedDataStore';
 
-// Define the structure for combined data
-export interface CombinedInteractionData {
-  ligand: string;
+// Define the structure for combined data used in tables/visualizations
+export interface CombinedInteractionData extends Partial<PathwayDominanceResult>, Partial<ModuleContextResult> {
+  // Ensure required keys are present if needed, or keep all optional with Partial
+  ligand: string; // Assume ligand/receptor are always present
   receptor: string;
-  score?: number; // Pathway score
-  ligand_norm_expr?: number;
-  receptor_avg_norm_expr?: number;
-  interaction_type?: string;
-  ligand_module?: string;
-  receptor_modules?: string[];
-  is_same_module?: boolean;
 }
 
 // interface ResultsPageProps { // No longer needed
 //   jobId: string | null;
 // }
 
+// ADDED: State for custom aggregation level (lifted from SummaryTabContent)
+// const [customAggregationLevel, setCustomAggregationLevel] = useState<CustomAggregationLevel>('whole_custom');
+
 const ResultsPage: React.FC = () => { // Define as standard functional component
+  // ADDED: State for custom aggregation level (lifted from SummaryTabContent)
+  const [customAggregationLevel, setCustomAggregationLevel] = useState<CustomAggregationLevel>('whole_custom');
+  
   const { jobId } = useParams<{ jobId: string }>(); // Get jobId from URL
   
   // Use the event-driven hook to manage job status
@@ -53,7 +56,8 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
   const [combinedAnalysisData, setCombinedAnalysisData] = useState<CombinedInteractionData[]>([]);
   const [lassoCoords, setLassoCoords] = useState<[number, number][] | null>(null); // ADDED state for lasso coords
   // ADDED: State for custom analysis results
-  const [customAnalysisResults, setCustomAnalysisResults] = useState<any | null>(null); // Define a more specific type later
+  // MODIFIED: Use the new bundle type for state
+  const [customAnalysisResults, setCustomAnalysisResults] = useState<CustomAnalysisResultsBundle | null>(null); 
   const [isLoadingCustomAnalysis, setIsLoadingCustomAnalysis] = useState(false);
   const [customAnalysisError, setCustomAnalysisError] = useState<string | null>(null);
 
@@ -181,18 +185,22 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
           setCustomAnalysisError("Missing job ID or lasso selection.");
           return;
       }
+      // REMOVED: Resetting aggregation level - it now just controls view
       console.log(`[ResultsPage] Triggering custom analysis for job ${jobId} with coords:`, lassoCoords);
       setIsLoadingCustomAnalysis(true);
       setCustomAnalysisError(null);
       setCustomAnalysisResults(null);
 
       try {
-          // MODIFIED: Correct API endpoint path
           const apiUrl = `/api/analysis/custom/${jobId}`; 
           const response = await fetch(apiUrl, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ polygon: lassoCoords }),
+              // MODIFIED: Remove aggregation level from body
+              body: JSON.stringify({ 
+                  polygon: lassoCoords 
+                  // REMOVED: aggregation: customAggregationLevel 
+              }),
           });
 
           if (!response.ok) {
@@ -200,11 +208,13 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
               throw new Error(`Custom analysis failed: ${response.status} ${errorText || response.statusText}`);
           }
 
-          const results = await response.json();
-          console.log("[ResultsPage] Received custom analysis results:", results);
-          setCustomAnalysisResults(results); // Store the results
-          // Maybe clear selectedPair for the new custom results view?
-          setSelectedPair(null);
+          // Store the raw results - expecting the bundle structure now
+          const results: CustomAnalysisResultsBundle = await response.json(); 
+          console.log("[ResultsPage] Received custom analysis results bundle:", results);
+          setCustomAnalysisResults(results); // Store the bundle
+          setSelectedPair(null); // Clear selected pair for the new custom results view
+          // Set view to whole results by default after new analysis
+          setCustomAggregationLevel('whole_custom'); 
 
       } catch (error) {
           console.error("[ResultsPage] Custom analysis error:", error);
@@ -213,7 +223,8 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
       } finally {
           setIsLoadingCustomAnalysis(false);
       }
-  }, [jobId, lassoCoords]); // Dependencies
+  // MODIFIED: Remove customAggregationLevel from dependencies - call is independent of view state
+  }, [jobId, lassoCoords]); 
   
   // --- Scope Change Handlers ---
   const handleScopeChange = useCallback((scope: ScopeType) => {
@@ -363,10 +374,13 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
                                 onSelectPair={handleSelectPair}
                                 apiScopeName={null} // No API scope for custom results display
                                 currentScope={selectedScope} 
-                                // Don't pass lasso/analyze handlers down again
+                                // Pass custom analysis state and handlers
                                 customAnalysisResults={customAnalysisResults} 
                                 isLoadingCustomAnalysis={false} // Already handled loading above
                                 customAnalysisError={null} // Already handled error above
+                                // ADDED: Pass aggregation state and setter
+                                customAggregationLevel={customAggregationLevel}
+                                setCustomAggregationLevel={setCustomAggregationLevel}
                             />
                       ) : (
                           // Initial state before analysis is run
@@ -391,6 +405,9 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
                         customAnalysisResults={null} 
                         isLoadingCustomAnalysis={false} 
                         customAnalysisError={null} 
+                        // ADDED: Pass aggregation state and setter (even if null/default)
+                        customAggregationLevel={customAggregationLevel} 
+                        setCustomAggregationLevel={setCustomAggregationLevel}
                     />
               </div>
           )}
@@ -398,5 +415,25 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
     </div>
   );
 };
+
+// Type for custom aggregation level (can be moved to a shared types file)
+type CustomAggregationLevel = 'whole_custom' | 'custom_by_layer';
+
+// REMOVED Simplified Type definitions at the end
+// interface AnalysisResultItem { // Simplified for example
+//     ligand?: string | null;
+//     receptor?: string | null;
+//     score?: number | null;
+//     [key: string]: any; // Allow extra fields
+// }
+// 
+// interface CustomAnalysisResponse {
+//     pathway_dominance: AnalysisResultItem[];
+//     module_context: AnalysisResultItem[];
+// }
+// 
+// interface LayeredCustomAnalysisResponse {
+//     results_by_layer: { [layerName: string]: CustomAnalysisResponse };
+// }
 
 export default ResultsPage; 

@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Any
 
 # Pydantic model for the mapping part of the payload
 class AnalysisMapping(BaseModel):
@@ -37,30 +37,39 @@ class AnalysisPayload(BaseModel):
 # --- NEW Models for Custom Lasso Analysis ---
 
 class CustomLassoAnalysisRequest(BaseModel):
-    polygon: List[List[float]] = Field(..., description="List of [x, y] coordinates defining the lasso polygon")
-    # We might need original file IDs/mappings here if they aren't easily retrievable from jobId context
-    # spatialFileId: Optional[str] = None
-    # interactionsFileId: Optional[str] = None
-    # modulesFileId: Optional[str] = None
-    # spatialMapping: Optional[AnalysisMapping] = None
-    # interactionsMapping: Optional[AnalysisMapping] = None
-    # modulesMapping: Optional[AnalysisMapping] = None
+    polygon: List[List[float]] = Field(..., description="List of [x, y] coordinates defining the lasso polygon. First and last points must be the same.")
 
-# Response model for analysis results (can be reused or adapted)
-# Assuming the structure returned by the core logic is consistent
+# Represents a single item in the results list for pathway/module analysis
 class AnalysisResultItem(BaseModel):
-    # Define fields based on pathway_dominance and module_context structure
-    # Example fields (adjust based on actual core.py output):
-    ligand: str
-    receptor: str
-    score: Optional[float] = None
+    # Common fields likely present in both pathway_dominance and module_context results
+    # Using Optional[...] and default=None allows flexibility if fields aren't always present
+    ligand: Optional[str] = None
+    receptor: Optional[str] = None
+    # Pathway specific fields
+    score: Optional[float] = None 
     ligand_norm_expr: Optional[float] = None
     receptor_avg_norm_expr: Optional[float] = None
+    # Module context specific fields
+    ligand_module: Optional[Any] = None # Can be str, int, float, null
+    receptor_modules: Optional[Any] = None # Can be list, str, int, float, null
     interaction_type: Optional[str] = None
-    ligand_module: Optional[str] = None
-    receptor_modules: Optional[List[str]] = None
-    is_same_module: Optional[bool] = None
 
-class CustomAnalysisResponse(BaseModel):
-    pathway_dominance: List[AnalysisResultItem] = Field(..., description="Pathway dominance results for the lasso region")
-    module_context: List[AnalysisResultItem] = Field(..., description="Module context results for the lasso region") 
+    # Allow extra fields to accommodate variations in analysis results
+    class Config:
+        extra = 'allow'
+
+# --- REPLACED CustomAnalysisResponse and LayeredCustomAnalysisResponse ---
+
+# Re-purposed: Represents results for a single scope (whole custom OR one layer)
+class CustomAnalysisScopeResult(BaseModel):
+    pathway_dominance: List[AnalysisResultItem] = Field(default_factory=list)
+    module_context: List[AnalysisResultItem] = Field(default_factory=list)
+
+# NEW: Response bundle containing both whole and layered results
+class CustomAnalysisResultsBundle(BaseModel):
+    # Results aggregated for the whole custom selection
+    whole_results: CustomAnalysisScopeResult = Field(...)
+    # Dictionary where keys are layer names (str)
+    # and values are the results for that layer within the lasso.
+    # Optional: Will be empty if no layers found or layer analysis fails.
+    layered_results: Dict[str, CustomAnalysisScopeResult] = Field(default_factory=dict) 

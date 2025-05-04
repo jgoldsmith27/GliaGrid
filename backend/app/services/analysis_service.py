@@ -4,7 +4,7 @@ import pandas as pd
 import anndata as ad
 from fastapi import HTTPException, Depends
 import time # For simulating work
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Union
 import logging # Import logging
 import asyncio
 from scipy.spatial import ConvexHull # ADDED: Import ConvexHull
@@ -12,7 +12,11 @@ import numpy as np # ADDED: Import numpy for array handling
 # Need geopandas and shapely for polygon filtering
 import geopandas as gpd
 from shapely.geometry import Point, Polygon
-from ..models.analysis_models import CustomAnalysisResponse, AnalysisResultItem, AnalysisMapping # Import response model and AnalysisMapping
+# MODIFIED: Import new bundle response model and scope result, remove deprecated ones
+from ..models.analysis_models import (
+    AnalysisResultItem, AnalysisMapping, 
+    CustomAnalysisScopeResult, CustomAnalysisResultsBundle 
+)
 # Import core logic functions
 from ..analysis_logic import core
 
@@ -410,11 +414,13 @@ class AnalysisService:
         original_job_id: str,
         polygon_coords: List[List[float]],
         initial_context: Dict[str, Any]
-    ) -> CustomAnalysisResponse:
-        """Runs the analysis pipeline on a subset of spatial data defined by a polygon."""
+    ) -> CustomAnalysisResultsBundle:
+        """Runs the analysis pipeline on a subset of spatial data defined by a polygon,
+           returning results aggregated across the whole selection AND by layer within the selection.
+        """
         
         service_start_time = time.time() # DEBUG
-        logger.debug(f"[Custom Analysis {original_job_id}] Service layer started.") # DEBUG
+        logger.debug(f"[Custom Analysis {original_job_id}] Service layer started (calculating whole + layers).") # DEBUG
 
         try:
             # 1. Extract context (file IDs, mappings)
@@ -482,48 +488,92 @@ class AnalysisService:
 
             logger.debug(f"[Custom Analysis {original_job_id}] Filtering duration: {time.time() - filter_start_time:.4f} seconds.") # DEBUG
             logger.debug(f"[Custom Analysis {original_job_id}] Filtered spatial data contains {len(filtered_spatial_df)} points.") # DEBUG
-            if filtered_spatial_df.empty:
-                 logger.warning(f"[Custom Analysis {original_job_id}] No spatial points found within the lasso selection. Returning empty results.") # INFO -> WARNING
-                 # Return empty results consistent with the expected structure
-                 return CustomAnalysisResponse(pathway_dominance=[], module_context=[]) 
 
-            # 4. Run Analysis Pipeline on Filtered Data using the standardized single-scope function
-            core_call_start_time = time.time() # DEBUG
-            logger.debug(f"[Custom Analysis {original_job_id}] Calling core single-scope analysis pipeline...") # DEBUG
+            # Initialize results containers
+            whole_results_data: CustomAnalysisScopeResult = CustomAnalysisScopeResult(pathway_dominance=[], module_context=[])
+            layered_results_data: Dict[str, CustomAnalysisScopeResult] = {}
+
+            # Check if any points remain after filtering
+            if filtered_spatial_df.empty:
+                 logger.warning(f"[Custom Analysis {original_job_id}] No spatial points found within the lasso selection. Returning empty results bundle.")
+                 # Return empty bundle
+                 return CustomAnalysisResultsBundle(whole_results=whole_results_data, layered_results=layered_results_data)
+
+            # 4. Run Analysis Pipeline for Whole Selection
+            whole_call_start_time = time.time() # DEBUG
+            logger.debug(f"[Custom Analysis {original_job_id}] Calling core single-scope analysis pipeline for whole selection...") # DEBUG
             
-            # Call the standardized function for single-scope analysis
-            custom_results = await core.run_analysis_pipeline_from_dataframes(
-                all_spatial_df=filtered_spatial_df, # Pass the filtered spatial data
+            whole_custom_results_dict = await core.run_analysis_pipeline_from_dataframes(
+                all_spatial_df=filtered_spatial_df, # Pass the polygon-filtered spatial data
                 interactions_df=interactions_df,   # Pass the full interactions data
                 modules_df=modules_df            # Pass the full modules data
             )
             
-            analysis_output = next(iter(custom_results.values()), {}) if custom_results else {}
-            logger.debug(f"[Custom Analysis {original_job_id}] Core analysis duration: {time.time() - core_call_start_time:.4f} seconds.") # DEBUG
-
-            # 5. Structure and Return Results (Simplified)
-            # Extract pathway and module results from the analysis output dictionary
-            pathway_final = analysis_output.get('pathway_dominance', [])
-            module_final = analysis_output.get('module_context', [])
-            
-            # Convert potential NaNs to None just in case (though core logic should handle it)
-            # This requires converting list of dicts -> DataFrame -> replace -> list of dicts, which is inefficient.
-            # Assume core logic returns JSON-compatible results (None instead of NaN).
-            # If issues arise, implement conversion here.
-            
-            # Create the response object using the directly extracted lists
-            response = CustomAnalysisResponse(
-                 pathway_dominance=pathway_final,
-                 module_context=module_final
+            # Extract results (assuming the function returns a dict with a single key like 'custom')
+            whole_analysis_output = next(iter(whole_custom_results_dict.values()), {}) if whole_custom_results_dict else {}
+            whole_results_data = CustomAnalysisScopeResult(
+                pathway_dominance=whole_analysis_output.get('pathway_dominance', []),
+                module_context=whole_analysis_output.get('module_context', [])
             )
-            
-            logger.debug(f"[Custom Analysis {original_job_id}] Service layer finished successfully. Total duration: {time.time() - service_start_time:.4f} seconds.") # DEBUG
-            return response
-            
+            logger.debug(f"[Custom Analysis {original_job_id}] Core analysis duration (whole_custom): {time.time() - whole_call_start_time:.4f} seconds.") # DEBUG
+
+            # 5. Run Analysis Pipeline Per Layer (if layer column exists)
+            layers_call_start_time = time.time() # DEBUG
+            if 'layer' in filtered_spatial_df.columns:
+                logger.debug(f"[Custom Analysis {original_job_id}] Running layer-specific analysis within the custom selection...") # DEBUG
+                
+                # Ensure layer column is string type for consistent grouping
+                filtered_spatial_df['layer'] = filtered_spatial_df['layer'].astype(str)
+                unique_layers = filtered_spatial_df['layer'].unique()
+                logger.debug(f"[Custom Analysis {original_job_id}] Found layers in selection: {unique_layers}")
+
+                for layer_name in unique_layers:
+                    layer_start_time = time.time() # DEBUG
+                    logger.debug(f"[Custom Analysis {original_job_id}] Processing layer: {layer_name}")
+                    layer_df = filtered_spatial_df[filtered_spatial_df['layer'] == layer_name]
+                    
+                    if layer_df.empty:
+                        logger.warning(f"[Custom Analysis {original_job_id}] Skipping empty layer: {layer_name}")
+                        layered_results_data[layer_name] = CustomAnalysisScopeResult(pathway_dominance=[], module_context=[]) # Add empty result
+                        continue
+                        
+                    logger.debug(f"[Custom Analysis {original_job_id}] Calling core analysis for layer '{layer_name}' ({len(layer_df)} points)... ")
+                    # Run analysis for this layer's subset of points
+                    layer_results_dict = await core.run_analysis_pipeline_from_dataframes(
+                        all_spatial_df=layer_df, # Pass the layer-specific spatial data
+                        interactions_df=interactions_df, # Pass full interactions
+                        modules_df=modules_df # Pass full modules
+                    )
+                    
+                    # Extract results for this layer
+                    layer_output = next(iter(layer_results_dict.values()), {}) if layer_results_dict else {}
+                    
+                    # Store results for this layer using the ScopeResult model
+                    layered_results_data[layer_name] = CustomAnalysisScopeResult(
+                        pathway_dominance=layer_output.get('pathway_dominance', []),
+                        module_context=layer_output.get('module_context', [])
+                    )
+                    logger.debug(f"[Custom Analysis {original_job_id}] Layer '{layer_name}' processing time: {time.time() - layer_start_time:.4f} seconds.") # DEBUG
+                
+                logger.debug(f"[Custom Analysis {original_job_id}] Total core analysis duration (custom_by_layer): {time.time() - layers_call_start_time:.4f} seconds.") # DEBUG
+            else:
+                logger.warning(f"[Custom Analysis {original_job_id}] 'layer' column not found in filtered spatial data. Skipping layer-specific analysis.")
+
+            # 6. Return the results bundle
+            logger.debug(f"[Custom Analysis {original_job_id}] Service layer duration: {time.time() - service_start_time:.4f} seconds.") # DEBUG
+            return CustomAnalysisResultsBundle(
+                whole_results=whole_results_data,
+                layered_results=layered_results_data
+            )
+
         except Exception as e:
-            logger.exception(f"Error during custom analysis service for job {original_job_id}: {e}")
+            logger.exception(f"Error during custom analysis service execution for job {original_job_id}: {e}")
             logger.debug(f"[Custom Analysis {original_job_id}] Service layer failed after {time.time() - service_start_time:.4f} seconds.") # DEBUG
-            raise e
+            # Re-raise as a generic internal server error if not already an HTTPException or specific ValueError
+            if not isinstance(e, (HTTPException, ValueError, FileNotFoundError)):
+                raise HTTPException(status_code=500, detail=f"Internal server error during custom analysis: {str(e)}")
+            else:
+                raise e # Re-raise specific handled exceptions
 
 # --- Dependency function MOVED HERE (outside the class) ---
 def get_analysis_service_dependency(job_service: JobService = Depends(get_job_service)) -> "AnalysisService":

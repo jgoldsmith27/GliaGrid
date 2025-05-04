@@ -72,4 +72,80 @@
 
 .cancelButton:hover {
     background-color: #777 !important; /* Lighter background on hover */
+}
+
+.errorText {
+  color: #dc3545; /* Bootstrap danger color */
+  margin-top: 10px;
+}
+
+.loadingContainer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 200px; /* Adjust as needed */
+}
+
+.warningsContainer {
+  background-color: #fff3cd; /* Bootstrap warning background */
+  color: #856404; /* Bootstrap warning text */
+  border: 1px solid #ffeeba; /* Bootstrap warning border */
+  border-radius: 4px;
+  padding: 10px;
+  margin-top: 10px;
+}
+
+.warningsContainer h4 {
+  margin-top: 0;
+  margin-bottom: 5px;
+}
+
+.warningsContainer ul {
+  margin-bottom: 0;
+  padding-left: 20px;
+}
+
+/* ADDED Styles */
+.customAggregationSelector {
+  margin-bottom: 15px; /* Space below the selector */
+  padding-bottom: 10px;
+  border-bottom: 1px solid #eee; /* Optional separator */
+}
+
+.customAggregationSelector label {
+  cursor: pointer;
+  margin-right: 15px; /* Space between radio buttons */
+}
+
+.customAggregationSelector input[type="radio"] {
+  margin-right: 5px;
+}
+
+/* ADDED: Style for layer dropdown */
+.layerSelectorDropdown {
+    margin-left: 15px; /* Align with the second radio button roughly */
+    padding: 4px 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background-color: white;
+    font-size: 0.9em;
+}
+
+.placeholderArea {
+  padding: 20px;
+  background-color: #f8f9fa; /* Light background for placeholder */
+  border: 1px dashed #ccc;
+  border-radius: 4px;
+  text-align: center;
+  color: #6c757d; /* Muted text color */
+}
+
+.placeholderArea h3 {
+  margin-top: 0;
+  color: #495057;
+}
+
+.spatialOverviewOnlyArea {
+    /* Styles if you want the spatial overview to look different when it's the only thing shown */
+    padding: 10px;
 } 

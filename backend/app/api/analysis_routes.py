@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Body, BackgroundTasks
 from pydantic import BaseModel, Field
-from typing import Dict, Optional, List, Any
+from typing import Dict, Optional, List, Any, Union
 import asyncio
 import uuid
 import json
@@ -12,7 +12,11 @@ import time
 # Import JobService and AnalysisService
 from app.services.job_service import JobService, get_job_service
 from app.services.analysis_service import AnalysisService
-from app.models.analysis_models import AnalysisMapping, AnalysisPayload, CustomLassoAnalysisRequest, CustomAnalysisResponse
+from app.models.analysis_models import (
+    AnalysisMapping, AnalysisPayload, 
+    CustomLassoAnalysisRequest, # Use updated request model
+    CustomAnalysisResultsBundle # Use NEW bundle response model
+)
 # Import core analysis logic directly
 from app.analysis_logic.core import run_stage1_counts_pipeline, run_pathway_dominance_pipeline, run_module_context_pipeline
 # Import FileService class instead of the specific function
@@ -149,26 +153,27 @@ async def start_analysis_endpoint(
 # --- REMOVED Endpoint for Custom Selection Analysis (Background Task version) ---
 
 @router.post("/custom/{job_id}",
-             response_model=CustomAnalysisResponse, # Specify response model
+             response_model=CustomAnalysisResultsBundle, # MODIFIED response model
              summary="Run Analysis on Custom Lasso Selection",
-             description="Filters the original spatial data using the provided polygon and runs the analysis pipeline on the subset.")
+             description="Filters the original spatial data using the provided polygon and runs the analysis pipeline on the subset, returning both whole-selection and layer-specific results.")
 async def run_custom_analysis_endpoint(
     job_id: str,
-    request: CustomLassoAnalysisRequest, # Use the existing request model
+    request: CustomLassoAnalysisRequest, # Uses updated model (no aggregation field)
     job_service: JobService = Depends(get_job_service), # Inject job service for context
     analysis_service: AnalysisService = Depends(get_analysis_service) # Inject analysis service
-):
+) -> CustomAnalysisResultsBundle: # MODIFIED return type hint
     """Endpoint to run analysis synchronously on a user-defined spatial subset.
        Uses the AnalysisService to perform the loading, filtering, and analysis.
     """
     request_start_time = time.time() # DEBUG: Record start time
     logger.debug(f"[Custom Analysis {job_id}] Received request with {len(request.polygon)} polygon points.") # DEBUG
 
-    logger.info(f"Received custom analysis request for job {job_id}.")
+    logger.info(f"Received custom analysis request for job {job_id}.") # Removed aggregation log
     if len(request.polygon) < 4:
         raise HTTPException(status_code=400, detail="Polygon must have at least 4 points (first and last the same).")
     if request.polygon[0] != request.polygon[-1]:
          raise HTTPException(status_code=400, detail="Polygon first and last points must be the same.")
+    # REMOVED: Validation for request.aggregation
 
     try:
         # 1. Get original job context (contains file IDs and mappings)
@@ -186,13 +191,15 @@ async def run_custom_analysis_endpoint(
 
         # 2. Call the AnalysisService method to run the custom analysis
         # Pass the original job ID, polygon coordinates, and the *results* context (which holds inputs)
-        custom_analysis_results: CustomAnalysisResponse = await analysis_service.run_custom_analysis(
+        # REMOVED: aggregation_level argument
+        custom_analysis_results: CustomAnalysisResultsBundle = await analysis_service.run_custom_analysis(
             original_job_id=job_id,
             polygon_coords=request.polygon,
             initial_context=job_results_context # Pass the results context containing inputs
+            # REMOVED: aggregation_level=request.aggregation 
         )
 
-        logger.info(f"Custom analysis completed for job {job_id}. Returning results.")
+        logger.info(f"Custom analysis completed for job {job_id}. Returning results.") # Removed aggregation log
         logger.debug(f"[Custom Analysis {job_id}] Endpoint duration: {time.time() - request_start_time:.4f} seconds.") # DEBUG
         return custom_analysis_results
 

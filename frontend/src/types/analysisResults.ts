@@ -20,14 +20,10 @@ export interface PathwayDominanceResult {
 export interface ModuleContextResult {
   ligand: string;
   receptor: string;
-  interaction_type: 'intra-module' | 'inter-module' | string; // Use 'interaction_type' for consistency, allow flexibility
-  ligand_module?: string; // Add module info (optional if not always present)
-  receptor_modules?: string[]; // Add receptor modules info (optional array)
-  is_same_module?: boolean; // Add same module flag (optional boolean)
-  // num_receptor_components_in_modules: number; // Likely not needed for display
-  // Add other potential fields if known, e.g., module names
-  // ligand_module?: string;
-  // receptor_module?: string;
+  interaction_type: string;
+  ligand_module: string;
+  receptor_modules: string[];
+  is_same_module: boolean;
 }
 
 /**
@@ -41,3 +37,27 @@ export interface SummaryStatsData {
 
 // Could potentially define a union type if useful elsewhere
 // export type InteractionResult = PathwayDominanceResult | ModuleContextResult; 
+
+// Combined type (potentially useful, but not strictly necessary if using individual results)
+// export interface CombinedResultItem extends PathwayDominanceResult, ModuleContextResult {}
+
+
+// --- Custom Analysis Response Structures (Refactored) ---
+
+// Structure for a single scope's result (either whole custom OR one layer)
+export interface CustomAnalysisScopeResult {
+    pathway_dominance: PathwayDominanceResult[];
+    module_context: ModuleContextResult[];
+}
+
+// Response bundle containing both whole and layered results
+export interface CustomAnalysisResultsBundle {
+    whole_results: CustomAnalysisScopeResult; // Always present
+    layered_results: { [layerName: string]: CustomAnalysisScopeResult }; // Optional/Can be empty
+}
+
+// DEPRECATED - Replaced by CustomAnalysisResultsBundle
+// export interface CustomAnalysisResponse extends CustomAnalysisScopeResult {}
+// export interface LayeredCustomAnalysisResponse {
+//     results_by_layer: { [layerName: string]: CustomAnalysisScopeResult };
+// } 
