@@ -86,95 +86,31 @@ const SummaryTabContent: React.FC<SummaryTabContentProps> = ({
 
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null); // For highlighting table row
   
-  const abortControllerRef = useRef<AbortController | null>(null);
+  // Use the custom hook for interaction data (non-custom scopes)
+  const { interactionVizData, isLoading: isLoadingInteractionViz, error: interactionVizError, warnings: interactionVizWarnings, cancelFetch: cancelInteractionVizFetch } = 
+    useInteractionData(jobId, selectedPair, currentScope !== 'custom' ? apiScopeName : null); 
 
-  // Use the custom hook for interaction data
-  const { 
-    interactionVizData, 
-    isLoading: isLoadingInteractionViz, // Rename hook output for consistency with existing JSX
-    error: interactionVizError, 
-    warnings: interactionVizWarnings,
-    // fetchInteractionData, // Not directly needed unless manual trigger is implemented
-    cancelFetch: cancelInteractionVizFetch // Rename for clarity
-  } = useInteractionData(jobId, selectedPair, currentScope !== 'custom' ? apiScopeName : null); // Only fetch if not custom scope initially
-
-  // Fetch function for All Points data
-  const fetchAllPoints = useCallback(async (currentJobId: string) => {
-     if (abortControllerRef.current) {
-        abortControllerRef.current.abort(); // Abort previous fetch
-    }
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-
-    // setLoadingAllPoints(true);
-    // setAllPointsError(null);
-    // setAllPointsData(null);
-
-    try {
-        const url = `http://localhost:8000/api/points/${currentJobId}/all`;
-        const response = await fetch(url, { signal: controller.signal });
-
-        if (controller.signal.aborted) {
-             console.log('All points fetch aborted');
-             return;
-        }
-
-        if (!response.ok) { 
-            throw new Error(await response.text() || 'Failed to fetch all points data'); 
-        }
-        const data: AllPointsData[] = await response.json();
-        // setAllPointsData(data);
-    } catch (err) {
-        if ((err as Error).name === 'AbortError') {
-             // setAllPointsError('Request cancelled.');
-        } else {
-            const message = err instanceof Error ? err.message : 'An unknown error occurred';
-            // setAllPointsError(message);
-        }
-        // setAllPointsData(null);
-    } finally {
-         if (abortControllerRef.current === controller) {
-             abortControllerRef.current = null;
-        }
-        // setLoadingAllPoints(false);
-    }
-  }, []); // Dependency: jobId implicitly via usage
-
-  // Effect to fetch data based on currentScope
+  // Effect to fetch data based on currentScope (REMOVED fetchAllPoints call)
   useEffect(() => {
     console.log(`[SummaryTabContent] useEffect triggered. Scope: ${currentScope}, Pair: ${selectedPair ? selectedPair.join('-') : 'null'}, apiScopeName: ${apiScopeName}`); 
     
-    // Reset spatial overview state when dependencies change
-    // setAllPointsData(null);
-    // setAllPointsError(null);
-    // setLoadingAllPoints(false);
-    // No need to reset interaction viz state, the hook manages it
-    
     if (jobId) {
         if (currentScope === 'custom') {
-             // Fetch all points data for custom scope
-             fetchAllPoints(jobId);
+             // REMOVED: fetchAllPoints(jobId);
              // Interaction viz hook will handle its state based on apiScopeName being 'custom'
         } 
-        // No explicit fetch call needed for interaction viz here; the hook handles it based on its dependencies (jobId, selectedPair, apiScopeName)
+        // No explicit fetch call needed for interaction viz here; the hook handles it based on its dependencies
     }
 
-      // Cleanup function for aborting spatial overview fetch on unmount or before next effect run
+      // REMOVED: Cleanup logic related to fetchAllPoints abortController
       return () => {
          console.log("[SummaryTabContent] useEffect cleanup");
-         if (abortControllerRef.current) { // Only cancel the spatial overview fetch
-              console.log("[SummaryTabContent] Aborting spatial overview fetch.");
-              abortControllerRef.current.abort();
-              abortControllerRef.current = null;
-          }
-         // No need to cancel interaction viz fetch here; the hook handles its own cleanup
+         // No cleanup needed here now for fetchAllPoints
       };
-  // Dependencies: Fetch when jobId, scope, or selected pair changes. apiScopeName is derived from scope, so it implicitly changes.
-  // Removed fetchInteractionVisualizationData from dependencies
-  // Keep fetchAllPoints
-  }, [jobId, currentScope, apiScopeName, selectedPair, fetchAllPoints, onSelectPair]); 
+  // MODIFIED: Removed fetchAllPoints from dependency array
+  }, [jobId, currentScope, apiScopeName, selectedPair, onSelectPair]); 
 
-  // Table row click handler - only relevant for non-custom scopes
+  // Table row click handler
   const handleTableRowClick = useCallback((row: CombinedInteractionData, index: number) => {
     // This handler applies to BOTH original and custom analysis tables
     console.log(`[SummaryTabContent] Row clicked: ${row.ligand}-${row.receptor}, Index: ${index}, Scope: ${currentScope}`); 
@@ -182,21 +118,6 @@ const SummaryTabContent: React.FC<SummaryTabContentProps> = ({
     const newPair: [string, string] = [row.ligand, row.receptor];
     onSelectPair(newPair); // Call parent handler to manage selectedPair state
   }, [onSelectPair, currentScope]);
-
-  // Generic cancel handler - now only cancels the spatial overview fetch
-  const handleCancelVizRequest = useCallback(() => {
-      if (abortControllerRef.current) {
-          console.log("[SummaryTabContent] Cancelling spatial overview fetch request.");
-          abortControllerRef.current.abort();
-          abortControllerRef.current = null; // Clear ref after abort
-          // setLoadingAllPoints(false); // Ensure loading stops
-          // setAllPointsError("Request cancelled by user."); // Set error state
-      } else {
-          console.log("[SummaryTabContent] No active spatial overview fetch request to cancel.");
-      }
-      // Note: To cancel the interaction viz, we would call cancelInteractionVizFetch()
-      // but it needs a separate button or logic tied to the interaction viz state.
-  }, []); // Removed dependency on abortControllerRef state, check directly
 
   // Helper to render the correct component based on scope and custom results
   const renderContent = () => {
