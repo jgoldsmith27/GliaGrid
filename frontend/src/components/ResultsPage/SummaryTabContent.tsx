@@ -149,12 +149,7 @@ const SummaryTabContent: React.FC<SummaryTabContentProps> = ({
         // If not loading and no error, check for results
         if (customAnalysisResults) {
 
-            // Use the interaction hook for custom results visualization
-            // MODIFIED: Pass lassoCoords here too
-            const { interactionVizData: customVizData, isLoading: isLoadingCustomViz, error: customVizError, cancelFetch: cancelCustomVizFetch } =
-                useInteractionData(jobId, selectedPair, apiScopeName, lassoCoords);
-
-            // --- Extract data based on aggregation level from the bundle --- 
+            // --- State and Logic for Custom Aggregation/Layer Selection ---
             const layeredData = customAnalysisResults.layered_results || {};
             const isLayeredAvailable = Object.keys(layeredData).length > 0;
             const availableLayers = Object.keys(layeredData);
@@ -173,7 +168,14 @@ const SummaryTabContent: React.FC<SummaryTabContentProps> = ({
                     setSelectedCustomLayer(null); // Clear layer selection when switching to whole view
                 }
             }, [customAggregationLevel, isLayeredAvailable, availableLayers, selectedCustomLayer]);
-            
+            // --- End State and Logic ---
+
+            // Use the interaction hook for custom results visualization
+            // MODIFIED: Pass correct scope name based on custom aggregation level
+            const scopeForCustomViz = customAggregationLevel === 'custom_by_layer' ? selectedCustomLayer : null;
+            const { interactionVizData: customVizData, isLoading: isLoadingCustomViz, error: customVizError, cancelFetch: cancelCustomVizFetch } =
+                useInteractionData(jobId, selectedPair, scopeForCustomViz, lassoCoords);
+
             // Get the specific data scope to display based on aggregation level and selected layer
             let currentCustomData: CustomAnalysisScopeResult | null = null;
             if (customAggregationLevel === 'whole_custom') {
