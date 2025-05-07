@@ -116,6 +116,82 @@ const getSignificanceStars = (qValue: number | null | undefined): string => {
   return ''; // Not significant at p < 0.05
 };
 
+// Replace the existing normalization function with this one
+const normalizeExpressionValue = (value: number | null | undefined): { display: string, raw: number } => {
+  if (value === null || value === undefined) {
+    return { display: '-', raw: 0 };
+  }
+  
+  // Just keep the raw value for calculations
+  const raw = value;
+  
+  // Display as percentages for easier comparison
+  // Show as percentage of typical values in this dataset
+  let display = '';
+  
+  // Format as percentage relative to a reference level of 1e-3
+  // This makes small values easier to comprehend
+  const relativePercentage = (value / 1e-3) * 100;
+  
+  if (relativePercentage < 0.01) {
+    display = '<0.01%';
+  } else if (relativePercentage < 0.1) {
+    display = relativePercentage.toFixed(2) + '%';
+  } else if (relativePercentage < 10) {
+    display = relativePercentage.toFixed(1) + '%';
+  } else {
+    display = Math.round(relativePercentage) + '%';
+  }
+  
+  return { display, raw };
+};
+
+// Update the q-value display function with a more intuitive approach
+const formatQValue = (qValue: number | null | undefined): { display: string, significance: string } => {
+  if (qValue === null || qValue === undefined) {
+    return { display: '-', significance: '' };
+  }
+  
+  let significance = '';
+  if (qValue < 0.001) significance = '***';
+  else if (qValue < 0.01) significance = '**';
+  else if (qValue < 0.05) significance = '*';
+  
+  // Format q-value more intuitively
+  let display = '';
+  if (qValue < 0.001) {
+    display = '<0.1%';
+  } else if (qValue < 0.01) {
+    display = '<1%';
+  } else if (qValue < 0.05) {
+    display = '<5%';
+  } else {
+    display = (qValue * 100).toFixed(0) + '%';
+  }
+  
+  return { display, significance };
+};
+
+// Add this new helper function to get colors for different abundance levels
+const getAbundanceColor = (level: string): string => {
+  switch (level) {
+    case 'Very low':
+      return '#9e9e9e'; // Grey
+    case 'Low':
+      return '#81c784'; // Light green
+    case 'Medium-low':
+      return '#4caf50'; // Green
+    case 'Medium':
+      return '#ffa726'; // Orange
+    case 'Medium-high':
+      return '#f57c00'; // Dark orange
+    case 'High':
+      return '#d32f2f'; // Red
+    default:
+      return 'inherit';
+  }
+};
+
 // --- Styled TableCell for padding consistency ---
 const StyledTableCell = styled(TableCell)(({ theme }) => ({
   [`&.${tableCellClasses.head}`]: {
@@ -133,6 +209,47 @@ const Stars = ({ significance }: { significance: number }) => {
   if (significance < 0.01) return <span style={{ marginLeft: 4, color: '#1976d2' }}>**</span>;
   if (significance < 0.05) return <span style={{ marginLeft: 4, color: '#1976d2' }}>*</span>;
   return null;
+};
+
+// Add a safe version of the Log2FC formatter
+const safeFormatLog2FC = (log2fc: number | null | undefined): { display: string, foldChange: string, isPositive: boolean } => {
+  if (log2fc === null || log2fc === undefined) {
+    return { display: '-', foldChange: '-', isPositive: false };
+  }
+  
+  const absLog2FC = Math.abs(log2fc);
+  const foldChange = Math.pow(2, absLog2FC).toFixed(1);
+  const isPositive = log2fc > 0;
+  
+  return {
+    display: absLog2FC.toFixed(2),
+    foldChange: `${foldChange}×`,
+    isPositive
+  };
+};
+
+const getDisplayNameAndRole = (item: DifferentialExpressionResultFE): { displayName: string, roleName: string } => {
+  if (item.type === 'ligand_receptor_pair') {
+    return {
+      displayName: `${item.ligand_id || '?'} → ${item.receptor_id || '?'}`,
+      roleName: "L-R Pair"
+    };
+  } else if (item.type === 'single_ligand') {
+    return {
+      displayName: item.molecule_id,
+      roleName: "Ligand"
+    };
+  } else if (item.type === 'single_receptor') {
+    return {
+      displayName: item.molecule_id,
+      roleName: "Receptor"
+    };
+  } else {
+    return {
+      displayName: item.molecule_id,
+      roleName: item.type || "Unknown"
+    };
+  }
 };
 
 const ComparisonToolPage: React.FC = () => {
@@ -747,29 +864,8 @@ const ComparisonToolPage: React.FC = () => {
                           }).sort((a: DifferentialExpressionResultFE, b: DifferentialExpressionResultFE) => (b.log2_fold_change || 0) - (a.log2_fold_change || 0))
                           .slice(0, 10)
                           .map((item: DifferentialExpressionResultFE, index: number) => {
-                            let displayName = item.molecule_id;
-                            let roleName = item.type;
-                            let iconOrMarker = '';
-
-                            if (item.type === 'ligand_receptor_pair') {
-                              displayName = `${item.ligand_id || 'L?'} → ${item.receptor_id || 'R?'}`;
-                              roleName = "L→R Pair";
-                              iconOrMarker = '🔄';
-                            } else if (item.type === 'single_ligand') {
-                              roleName = "Ligand";
-                              iconOrMarker = '📤';
-                            } else if (item.type === 'single_receptor') {
-                              roleName = "Receptor";
-                              iconOrMarker = '📥';
-                            }
-                            
-                            // Calculate fold change for display
-                            const foldChange = item.log2_fold_change ? 
-                              (item.log2_fold_change > 0 ? 
-                                `${Math.pow(2, item.log2_fold_change).toFixed(1)}× higher` : 
-                                `${Math.pow(2, -item.log2_fold_change).toFixed(1)}× lower`)
-                              : 'N/A';
-                              
+                            const { displayName, roleName } = getDisplayNameAndRole(item);
+                            const { display: foldChange, isPositive } = safeFormatLog2FC(item.log2_fold_change);
                             const stars = getSignificanceStars(item.q_value);
                             
                             return (
@@ -783,7 +879,7 @@ const ComparisonToolPage: React.FC = () => {
                               }}>
                                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                   <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                                    <Typography sx={{ mr: 1, color: '#666' }}>{iconOrMarker}</Typography>
+                                    <Typography sx={{ mr: 1, color: '#666' }}>{isPositive ? '🔼' : '🔽'}</Typography>
                                     <Typography sx={{ fontWeight: 'bold' }}>
                                       {displayName} {stars}
                                     </Typography>
@@ -792,7 +888,7 @@ const ComparisonToolPage: React.FC = () => {
                                     </Typography>
                                   </Box>
                                   <Typography variant="body2" sx={{ 
-                                    color: '#d32f2f', 
+                                    color: isPositive ? '#d32f2f' : '#1976d2', 
                                     fontWeight: 'bold',
                                     backgroundColor: 'rgba(211, 47, 47, 0.1)',
                                     px: 1,
@@ -867,29 +963,8 @@ const ComparisonToolPage: React.FC = () => {
                           }).sort((a: DifferentialExpressionResultFE, b: DifferentialExpressionResultFE) => (a.log2_fold_change || 0) - (b.log2_fold_change || 0))
                           .slice(0, 10)
                           .map((item: DifferentialExpressionResultFE, index: number) => {
-                            let displayName = item.molecule_id;
-                            let roleName = item.type;
-                            let iconOrMarker = '';
-
-                            if (item.type === 'ligand_receptor_pair') {
-                              displayName = `${item.ligand_id || 'L?'} → ${item.receptor_id || 'R?'}`;
-                              roleName = "L→R Pair";
-                              iconOrMarker = '🔄';
-                            } else if (item.type === 'single_ligand') {
-                              roleName = "Ligand";
-                              displayName = item.molecule_id; 
-                            } else if (item.type === 'single_receptor') {
-                              roleName = "Receptor";
-                              displayName = item.molecule_id; 
-                            }
-                            
-                            // Calculate fold change for display
-                            const foldChange = item.log2_fold_change ? 
-                              (item.log2_fold_change > 0 ? 
-                                `${Math.pow(2, item.log2_fold_change).toFixed(1)}× higher` : 
-                                `${Math.pow(2, -item.log2_fold_change).toFixed(1)}× higher`)
-                              : 'N/A';
-                              
+                            const { displayName, roleName } = getDisplayNameAndRole(item);
+                            const { display: foldChange, isPositive } = safeFormatLog2FC(item.log2_fold_change);
                             const stars = getSignificanceStars(item.q_value);
                             
                             return (
@@ -903,7 +978,7 @@ const ComparisonToolPage: React.FC = () => {
                               }}>
                                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                   <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                                    <Typography sx={{ mr: 1, color: '#666' }}>{iconOrMarker}</Typography>
+                                    <Typography sx={{ mr: 1, color: '#666' }}>{isPositive ? '🔼' : '🔽'}</Typography>
                                     <Typography sx={{ fontWeight: 'bold' }}>
                                       {displayName} {stars}
                                     </Typography>
@@ -912,9 +987,9 @@ const ComparisonToolPage: React.FC = () => {
                                     </Typography>
                                   </Box>
                                   <Typography variant="body2" sx={{ 
-                                    color: '#1976d2', 
+                                    color: isPositive ? '#d32f2f' : '#1976d2', 
                                     fontWeight: 'bold',
-                                    backgroundColor: 'rgba(25, 118, 210, 0.1)',
+                                    backgroundColor: 'rgba(211, 47, 47, 0.1)',
                                     px: 1,
                                     py: 0.5,
                                     borderRadius: 1
@@ -1124,25 +1199,32 @@ const ComparisonToolPage: React.FC = () => {
                       <Table stickyHeader className={styles.resultsTable} aria-label="comparison results table">
                         <TableHead>
                           <TableRow>
-                            <TableCell>Molecule</TableCell>
                             <TableCell>
-                              <Tooltip title="Average normalized expression value in first selection (may appear as 0.000 for very low abundance molecules)">
+                              <Tooltip title="Unique molecule identifier or ligand-receptor pair">
                                 <Box sx={{display: 'flex', alignItems: 'center'}}>
-                                  Normalized Mean (Sel 1)
+                                  Molecule
                                   <InfoIcon sx={{ml: 0.5, fontSize: '0.9rem', color: 'text.secondary'}} />
                                 </Box>
                               </Tooltip>
                             </TableCell>
                             <TableCell>
-                              <Tooltip title="Average normalized expression value in second selection (may appear as 0.000 for very low abundance molecules)">
+                              <Tooltip title="Relative expression level in the first selection (hover for exact values)">
                                 <Box sx={{display: 'flex', alignItems: 'center'}}>
-                                  Normalized Mean (Sel 2)
+                                  Rel. Expression (Sel 1)
                                   <InfoIcon sx={{ml: 0.5, fontSize: '0.9rem', color: 'text.secondary'}} />
                                 </Box>
                               </Tooltip>
                             </TableCell>
                             <TableCell>
-                              <Tooltip title="Log2 of fold change (Sel2/Sel1). Positive values indicate higher expression in Sel2, negative values indicate higher expression in Sel1.">
+                              <Tooltip title="Relative expression level in the second selection (hover for exact values)">
+                                <Box sx={{display: 'flex', alignItems: 'center'}}>
+                                  Rel. Expression (Sel 2)
+                                  <InfoIcon sx={{ml: 0.5, fontSize: '0.9rem', color: 'text.secondary'}} />
+                                </Box>
+                              </Tooltip>
+                            </TableCell>
+                            <TableCell>
+                              <Tooltip title="Log2 Fold Change between selections. Positive values indicate higher expression in Selection 2.">
                                 <Box sx={{display: 'flex', alignItems: 'center'}}>
                                   Log₂FC
                                   <InfoIcon sx={{ml: 0.5, fontSize: '0.9rem', color: 'text.secondary'}} />
@@ -1150,9 +1232,9 @@ const ComparisonToolPage: React.FC = () => {
                               </Tooltip>
                             </TableCell>
                             <TableCell>
-                              <Tooltip title="False Discovery Rate adjusted p-value. Lower values indicate higher statistical significance.">
+                              <Tooltip title="False discovery rate expressed as a percentage (chance of false positive)">
                                 <Box sx={{display: 'flex', alignItems: 'center'}}>
-                                  q-value
+                                  FDR
                                   <InfoIcon sx={{ml: 0.5, fontSize: '0.9rem', color: 'text.secondary'}} />
                                 </Box>
                               </Tooltip>
@@ -1183,84 +1265,65 @@ const ComparisonToolPage: React.FC = () => {
                                      typeFilter;
                             })
                             .map((item: DifferentialExpressionResultFE, index: number) => {
-                              let displayName = item.molecule_id; // Default display name (will be the ID/Pair)
-                              let roleName = item.type; // Default role name (will be Ligand/Receptor/L-R Pair)
-
-                              if (item.type === 'ligand_receptor_pair') {
-                                displayName = `${item.ligand_id || 'L?'} - ${item.receptor_id || 'R?'}`;
-                                roleName = "L-R Pair";
-                              } else if (item.type === 'single_ligand') {
-                                roleName = "Ligand";
-                                displayName = item.molecule_id; 
-                              } else if (item.type === 'single_receptor') {
-                                roleName = "Receptor";
-                                displayName = item.molecule_id; 
-                              } else {
-                                 roleName = `Unhandled: ${item.type}`;
-                                 displayName = item.molecule_id;
-                              }
+                              const { displayName, roleName } = getDisplayNameAndRole(item);
+                              const { display: foldChange, isPositive } = safeFormatLog2FC(item.log2_fold_change);
+                              const stars = getSignificanceStars(item.q_value);
                               
-                              const mean1Str = item.mean_selection1?.toFixed(3);
-                              const mean2Str = item.mean_selection2?.toFixed(3);
-                              const log2fcStr = item.log2_fold_change?.toFixed(2);
-                              const pValueStr = item.p_value?.toExponential(1);
-                              const qValueStr = item.q_value?.toExponential(1);
-                              
-                              // Get visual elements
-                              const log2fcColor = getLog2fcColor(item.log2_fold_change);
-                              const significanceStars = getSignificanceStars(item.q_value);
-
                               return (
                                 <TableRow key={`${item.molecule_id}-${index}`}>
-                                  <TableCell>{roleName}</TableCell>
+                                  <TableCell>{displayName}</TableCell>
                                   <TableCell>
-                                    {item.mean_selection1 !== null && item.mean_selection1 !== undefined ? 
-                                      ((item.mean_selection1 < 0.001) ? 
-                                        <Tooltip title={`Exact value: ${item.mean_selection1.toExponential(4)}`}>
-                                          <span>{item.mean_selection1.toFixed(3)}</span>
-                                        </Tooltip> : 
-                                        item.mean_selection1.toFixed(3)
-                                      ) : '0.000'
-                                    }
-                                  </TableCell>
-                                  <TableCell>
-                                    {item.mean_selection2 !== null && item.mean_selection2 !== undefined ? 
-                                      ((item.mean_selection2 < 0.001) ? 
-                                        <Tooltip title={`Exact value: ${item.mean_selection2.toExponential(4)}`}>
-                                          <span>{item.mean_selection2.toFixed(3)}</span>
-                                        </Tooltip> : 
-                                        item.mean_selection2.toFixed(3)
-                                      ) : '0.000'
-                                    }
-                                  </TableCell>
-                                  <TableCell>
-                                    <Box sx={{display: 'flex', alignItems: 'center'}}>
-                                      {item.log2_fold_change > 0 ? (
-                                        <ArrowUpward sx={{color: 'success.main', mr: 0.5, fontSize: '1rem'}} />
-                                      ) : (
-                                        <ArrowDownward sx={{color: 'error.main', mr: 0.5, fontSize: '1rem'}} />
-                                      )}
-                                      {Math.abs(item.log2_fold_change).toFixed(2)}
-                                      <Tooltip title={`Corresponds to a ${Math.pow(2, Math.abs(item.log2_fold_change)).toFixed(1)}× ${item.log2_fold_change > 0 ? 'increase' : 'decrease'}`}>
-                                        <Box component="span" sx={{ml: 0.5, color: 'text.secondary', fontSize: '0.8rem'}}>
-                                          ({Math.pow(2, Math.abs(item.log2_fold_change)).toFixed(1)}×)
-                                        </Box>
-                                      </Tooltip>
-                                    </Box>
-                                  </TableCell>
-                                  <TableCell>
-                                    {item.q_value < 0.001 ? 
-                                      <Box sx={{display: 'flex', alignItems: 'center'}}>
-                                        <Tooltip title={`Exact value: ${item.q_value.toExponential(4)}`}>
-                                          <span>{item.q_value.toFixed(3)}</span>
+                                    {(() => {
+                                      const normValue = normalizeExpressionValue(item.mean_selection1);
+                                      return (
+                                        <Tooltip title={`Exact value: ${item.mean_selection1?.toExponential(4) || 'N/A'}`}>
+                                          <span>{normValue.display}</span>
                                         </Tooltip>
-                                        <Stars significance={item.q_value} />
-                                      </Box> : 
-                                      <Box sx={{display: 'flex', alignItems: 'center'}}>
-                                        {item.q_value.toFixed(3)}
-                                        <Stars significance={item.q_value} />
-                                      </Box>
-                                    }
+                                      );
+                                    })()}
+                                  </TableCell>
+                                  <TableCell>
+                                    {(() => {
+                                      const normValue = normalizeExpressionValue(item.mean_selection2);
+                                      return (
+                                        <Tooltip title={`Exact value: ${item.mean_selection2?.toExponential(4) || 'N/A'}`}>
+                                          <span>{normValue.display}</span>
+                                        </Tooltip>
+                                      );
+                                    })()}
+                                  </TableCell>
+                                  <TableCell>
+                                    {(() => {
+                                      const log2fcResult = safeFormatLog2FC(item.log2_fold_change);
+                                      return (
+                                        <Box sx={{display: 'flex', alignItems: 'center'}}>
+                                          {log2fcResult.isPositive ? (
+                                            <ArrowUpward sx={{color: 'success.main', mr: 0.5, fontSize: '1rem'}} />
+                                          ) : (
+                                            <ArrowDownward sx={{color: 'error.main', mr: 0.5, fontSize: '1rem'}} />
+                                          )}
+                                          {log2fcResult.display}
+                                          <Tooltip title={`${log2fcResult.isPositive ? 'Increase' : 'Decrease'} of ${log2fcResult.foldChange}`}>
+                                            <Box component="span" sx={{ml: 0.5, color: 'text.secondary', fontSize: '0.8rem'}}>
+                                              ({log2fcResult.foldChange})
+                                            </Box>
+                                          </Tooltip>
+                                        </Box>
+                                      );
+                                    })()}
+                                  </TableCell>
+                                  <TableCell>
+                                    {(() => {
+                                      const { display: qValueDisplay, significance: qValueSignificance } = formatQValue(item.q_value);
+                                      return (
+                                        <Tooltip title={`Exact q-value: ${item.q_value?.toExponential(4) || 'N/A'}`}>
+                                          <span>
+                                            {qValueDisplay} 
+                                            <span style={{ color: '#1976d2', marginLeft: 4 }}>{qValueSignificance}</span>
+                                          </span>
+                                        </Tooltip>
+                                      );
+                                    })()}
                                   </TableCell>
                                   <TableCell>
                                     {roleName}
