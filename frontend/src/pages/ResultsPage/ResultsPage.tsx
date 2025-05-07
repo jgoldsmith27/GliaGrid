@@ -459,6 +459,34 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
 
   // --- Render Main Layout --- 
   console.log("[ResultsPage] Passing onAnalyzeSelection:", typeof handleAnalyzeLasso); // LOGGING
+
+  const searchBarInputs = (
+    <>
+      <div className={styles.controlGroup} style={{ marginTop: '1rem', marginBottom: '0.5rem' }}>
+        <TextField
+          label="Search Ligand"
+          variant="outlined"
+          size="small"
+          fullWidth
+          value={ligandSearchTerm}
+          onChange={(e) => setLigandSearchTerm(e.target.value)}
+          className={styles.searchInput}
+        />
+      </div>
+      <div className={styles.controlGroup} style={{ marginBottom: '1rem' }}>
+        <TextField
+          label="Search Receptor"
+          variant="outlined"
+          size="small"
+          fullWidth
+          value={receptorSearchTerm}
+          onChange={(e) => setReceptorSearchTerm(e.target.value)}
+          className={styles.searchInput}
+        />
+      </div>
+    </>
+  );
+
   return (
     <div className={styles.resultsPageLayout}> {/* New overall layout class */} 
       {/* Back Button Container - Added */}
@@ -495,29 +523,8 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
             </div>
         )}
         
-        {/* ADDED: Search input fields */}
-        <div className={styles.controlGroup}>
-          <TextField
-            label="Search Ligand"
-            variant="outlined"
-            size="small"
-            fullWidth
-            value={ligandSearchTerm}
-            onChange={(e) => setLigandSearchTerm(e.target.value)}
-            className={styles.searchInput} // Added for potential styling
-          />
-        </div>
-        <div className={styles.controlGroup}>
-          <TextField
-            label="Search Receptor"
-            variant="outlined"
-            size="small"
-            fullWidth
-            value={receptorSearchTerm}
-            onChange={(e) => setReceptorSearchTerm(e.target.value)}
-            className={styles.searchInput} // Added for potential styling
-          />
-        </div>
+        {/* Conditionally render search bars in Control Area for non-custom scopes */}
+        {selectedScope !== 'custom' && searchBarInputs}
         
          {/* Add other filters/settings here later */}
       </div>
@@ -536,6 +543,8 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
                           />
                       )}
                   </div>
+                  {/* Render search bars here for custom scope */}
+                  {searchBarInputs}
                   <div className={styles.customResultsArea}> {/* Area below spatial for results/loading */} 
                       {isLoadingCustomAnalysis ? (
                           <div className={styles.loadingContainer}> 
@@ -567,6 +576,9 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
                                 displayedVizData={displayedVizData}
                                 isLoadingDisplayedViz={isLoadingDisplayedViz}
                                 displayedVizError={displayedVizError}
+                                // ADDED: Pass search terms for custom results filtering
+                                ligandSearchTerm={ligandSearchTerm}
+                                receptorSearchTerm={receptorSearchTerm}
                             />
                       ) : (
                           // Initial state before analysis is run

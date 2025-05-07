@@ -40,6 +40,9 @@ interface SummaryTabContentProps {
   isLoadingDisplayedViz: boolean;
   displayedVizError: string | null;
   onSelectPair: (pair: [string, string] | null) => void;
+  // ADDED: Search term props for filtering custom results
+  ligandSearchTerm?: string; // Optional, as they are for custom scope
+  receptorSearchTerm?: string;
 }
 
 // Define columns for the combined table
@@ -80,7 +83,10 @@ const SummaryTabContent: React.FC<SummaryTabContentProps> = ({
   displayedVizData,
   isLoadingDisplayedViz,
   displayedVizError,
-  onSelectPair
+  onSelectPair,
+  // ADDED: Search term props for filtering custom results
+  ligandSearchTerm, // Optional, as they are for custom scope
+  receptorSearchTerm,
 }) => {
   // REMOVED: Internal state for custom aggregation level
   // const [customAggregationLevel, setCustomAggregationLevel] = useState<CustomAggregationLevel>('whole_custom');
@@ -168,6 +174,23 @@ const SummaryTabContent: React.FC<SummaryTabContentProps> = ({
                 return { ...pathwayItem, ...(moduleItem || {}) }; 
             });
 
+            // ADDED: Filter customCombinedData based on search terms
+            let filteredCustomCombinedData = customCombinedData;
+            const ligandQuery = ligandSearchTerm?.toLowerCase().trim();
+            const receptorQuery = receptorSearchTerm?.toLowerCase().trim();
+
+            if (ligandQuery) {
+              filteredCustomCombinedData = filteredCustomCombinedData.filter(item =>
+                item.ligand?.toLowerCase().includes(ligandQuery)
+              );
+            }
+
+            if (receptorQuery) {
+              filteredCustomCombinedData = filteredCustomCombinedData.filter(item =>
+                item.receptor?.toLowerCase().includes(receptorQuery)
+              );
+            }
+
             // ADDED BACK: Use interaction hook specifically for custom viz data
             // Use displayedVizPair from props to know *which* pair to fetch for
             const scopeForCustomViz = customAggregationLevel === 'custom_by_layer' ? selectedCustomLayer : null;
@@ -230,7 +253,7 @@ const SummaryTabContent: React.FC<SummaryTabContentProps> = ({
                       <div className={styles.tableArea}>
                         <h3>Interaction Scores (Whole Custom Selection)</h3>
                         <AnalysisTable
-                          data={customCombinedData} 
+                          data={filteredCustomCombinedData}
                           columns={combinedColumns}
                           onRowClick={handleTableRowClick}
                           selectedRowIndex={selectedRowIndex}
@@ -272,7 +295,7 @@ const SummaryTabContent: React.FC<SummaryTabContentProps> = ({
                         <div className={styles.tableArea}>
                           <h3>Interaction Scores (Layer: {selectedCustomLayer})</h3>
                           <AnalysisTable
-                            data={customCombinedData} 
+                            data={filteredCustomCombinedData}
                             columns={combinedColumns}
                             onRowClick={handleTableRowClick}
                             selectedRowIndex={selectedRowIndex}
