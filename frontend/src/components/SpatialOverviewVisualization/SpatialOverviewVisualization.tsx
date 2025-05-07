@@ -82,12 +82,14 @@ interface SpatialOverviewVisualizationProps {
   jobId: string;
   onLassoSelect?: (selectedCoords: [number, number][] | null) => void; // MODIFIED: Expect coords or null
   onAnalyzeSelection?: () => void; // ADDED: Callback to trigger analysis
+  showAnalyzeButton?: boolean; // ADDED: New prop to control button visibility
 }
 
 const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> = ({ 
   jobId, 
   onLassoSelect, 
-  onAnalyzeSelection // Destructure the prop
+  onAnalyzeSelection, // Destructure the prop
+  showAnalyzeButton = true // ADDED: Destructure with default value
 }) => {
   // ADDED: Log received prop
   console.log("[SpatialOverviewVisualization] Received onAnalyzeSelection:", typeof onAnalyzeSelection);
@@ -518,6 +520,16 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
     );
   }
 
+  // ADDED: Handler for the analyze button click
+  const handleAnalyzeLassoClick = () => {
+    console.log("[SpatialOverview] Analyze Lasso button clicked.");
+    if (lassoPoints.length >= 4 && onAnalyzeSelection) { // Ensure lasso is complete and callback exists
+      onAnalyzeSelection();
+    } else if (lassoPoints.length < 4) {
+      alert("Please complete the lasso selection before analyzing.");
+    }
+  };
+
   // Main Render
   return (
     <div ref={deckContainerRef} className={`${styles.spatialOverviewContainer} ${isFullscreen ? styles.fullscreen : ''}`}>
@@ -619,20 +631,19 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
                             </Tooltip>
                         )}
                     </div>
-                    <Tooltip title="Analyze Selection">
-                        <span> 
-                        <Button 
-                            variant="outlined"
-                            color="primary"
-                            onClick={onAnalyzeSelection} 
-                            disabled={lassoPoints.length < 4 || isDrawingLasso || isRulerActive} 
-                            size="small"
-                            sx={{ mt: 1.5, width: '100%' }}
-                        >
-                            Analyze Selection
-                        </Button>
-                        </span>
-                    </Tooltip>
+                    {/* MODIFIED: Render button if showAnalyzeButton and onAnalyzeSelection are true, disable based on lassoPoints */}
+                    {showAnalyzeButton && onAnalyzeSelection && (
+                      <Button 
+                        variant="contained" 
+                        onClick={handleAnalyzeLassoClick} 
+                        disabled={lassoPoints.length < 4 || isDrawingLasso || isRulerActive} // Disable logic remains here
+                        className={styles.controlButton} 
+                        size="small"
+                        sx={{ mt: 1 }}
+                      >
+                        Analyze Selection
+                      </Button>
+                    )}
                 </div>
                 {/* Ruler Controls */} 
                 <div className={`${styles.controlSection} ${styles.toolGroup}`}> 

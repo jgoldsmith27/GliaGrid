@@ -293,6 +293,7 @@ const ComparisonToolPage: React.FC = () => {
                             onLassoSelect={handleLassoSelectForSelection2}
                             // onAnalyzeSelection can be a no-op or adapted if needed later for live feedback
                             onAnalyzeSelection={() => console.log("Analyze Selection clicked in Comparison (Sel2) - No-op for now")}
+                            showAnalyzeButton={false}
                             // We might need to pass layerBoundaries if relevant for this viz context
                             // layerBoundaries={jobStatusForSelection1Project?.results?.outputs?.layer_boundaries}
                         />
