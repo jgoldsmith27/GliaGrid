@@ -13,6 +13,7 @@ import useJobStatus from '../../hooks/useJobStatus'; // Correct: Default import
 import booleanPointInPolygon from '@turf/boolean-point-in-polygon'; // Correct: Default import
 import { polygon as turfPolygon, point as turfPoint, feature, polygon, lineString as turfLineString } from '@turf/helpers'; // Correct: Named imports + types
 import { Feature as GeoJsonFeature, Point as GeoJsonPoint, GeoJsonProperties, Polygon } from 'geojson'; // Import GeoJSON types
+import ScaleBar from '../VisualizationHelpers/ScaleBar'; // Import the new ScaleBar component
 
 // Define types locally or import from a central types file
 // Removed SpatialPoint definition as PointFeature is imported
@@ -311,7 +312,10 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
     setIsFullscreen(!isFullscreen);
   };
 
-  const onDeckError = useCallback((error: Error) => console.error('[DeckGL Error - SpatialOverview]', error), []);
+  const onDeckError = useCallback((error: Error, layer: any) => {
+    console.error('[DeckGL Error]', error, 'Layer:', layer?.id);
+    // Optionally, you could add state to display a user-friendly error message
+  }, []);
 
   // Tooltip function - update to show layer name when hovering over polygon
   const getTooltipText = useCallback((info: PickingInfo | null | undefined): string | null => { // Correct type: PickingInfo
@@ -360,32 +364,36 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
   }
 
   // Main Render
+  const deckContainerRef = useRef<HTMLDivElement>(null); // Ref for the DeckGL container
+
   return (
-    <div className={`${styles.spatialOverviewContainer} ${isFullscreen ? styles.fullscreen : ''}`}>
-        {/* Removed point count indicator */}
-        {/* <div className={styles.resolutionIndicator}>...</div> */}
-      <div className={styles.deckGlWrapper}>
+    <div ref={deckContainerRef} className={`${styles.spatialOverviewContainer} ${isFullscreen ? styles.fullscreen : ''}`}>
+      <div className={styles.deckGlWrapper}> 
         <DeckGL
           views={new OrthographicView({id: 'ortho-overview-view'})} // Unique view id
-          viewState={viewState}
+          viewState={viewState} // Use the controlled viewState for zoom and target
           onViewStateChange={onViewStateChange}
-          controller={true}
+          controller={true} // Enable default DeckGL controller
           onError={onDeckError}
-          layers={layers}
+          layers={layers as any[]}
           getTooltip={getTooltipText} 
-          // Add drag handlers for lasso
           onDragStart={handleDragStart}
           onDrag={handleDrag}
           onDragEnd={handleDragEnd}
-          // Disable pan/zoom while drawing lasso?
-          // controller={isDrawingLasso ? null : true}
           getCursor={({isDragging: deckIsDragging}) => isDrawingLasso ? 'crosshair' : (deckIsDragging ? 'grabbing' : 'grab')}
           style={{ width: '100%', height: '100%', position: 'relative' }}
         />
+        {/* Add ScaleBar here, ensure viewState and zoom are valid */}
+        {viewState && typeof viewState.zoom === 'number' && (
+          <ScaleBar 
+            currentZoom={viewState.zoom} 
+            unitsPerMicron={2} // 2 coordinate units = 1 micron
+            targetPixelWidth={100} // Optional: aim for a 100px wide bar
+          />
+        )}
       </div>
-      {/* Controls Overlay */}
+      {/* Layer Visibility Controls */}
       <div className={styles.controlsOverlay}>
-          {/* Layer Visibility Controls */}
           <div className={styles.controlSection}>
               <h4>Layers</h4>
               <div className={styles.layerLegendContainer}>

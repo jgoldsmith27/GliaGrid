@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { ScatterplotLayer, PolygonLayer } from '@deck.gl/layers';
 import { ScreenGridLayer, HeatmapLayer, HexagonLayer } from '@deck.gl/aggregation-layers';
 import DeckGL from '@deck.gl/react';
@@ -7,6 +7,7 @@ import { scaleOrdinal } from 'd3-scale';
 import { schemeCategory10 } from 'd3-scale-chromatic';
 import { Button, CircularProgress, Box } from '@mui/material';
 import styles from './InteractionVisualization.module.css';
+import ScaleBar from '../VisualizationHelpers/ScaleBar';
 
 // Interface for individual points from backend (now includes gene)
 interface PointWithGene {
@@ -185,6 +186,8 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
   const [layerColors, setLayerColors] = useState<Record<string, Color>>({});
   const [uniqueLayerNames, setUniqueLayerNames] = useState<string[]>([]);
   const [allLayersVisible, setAllLayersVisible] = useState(true);
+
+  const deckContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (layerBoundaries) {
@@ -495,7 +498,7 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
   }, [allLayersVisible, uniqueLayerNames]);
 
   return (
-    <div className={`${styles.interactionVisualizationContainer} ${isFullscreen ? styles.fullscreen : ''}`}>
+    <div ref={deckContainerRef} className={`${styles.interactionVisualizationContainer} ${isFullscreen ? styles.fullscreen : ''}`}>
       <div className={styles.deckGlWrapper}>
         {isLoading && (
           <Box
@@ -526,15 +529,22 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
           </Box>
         )}
         <DeckGL
-          views={new OrthographicView({id: 'ortho-view'})}
+          views={new OrthographicView({id: 'interaction-ortho-view'})}
+          initialViewState={initialViewState as OrthographicViewState}
           viewState={viewState}
           onViewStateChange={onViewStateChange}
           controller={true}
           onError={onDeckError}
-          layers={layers}
+          layers={layers as any[]}
           getTooltip={({object}) => object && `Point: (${object.x.toFixed(2)}, ${object.y.toFixed(2)})`}
           style={{ width: '100%', height: '100%', position: 'relative' }}
         />
+        {viewState && typeof viewState.zoom === 'number' && (
+          <ScaleBar 
+            currentZoom={viewState.zoom} 
+            unitsPerMicron={2}
+          />
+        )}
         {!isLoading && (
           <div className={styles.deckOverlayControls}>
               <div className={styles.deckButtons}>
@@ -613,7 +623,6 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
                           </label>
                   </div>
               </div>
-              {/* --- ADDED: Layer Controls --- */}
               <div className={styles.controlSection}>
                   <div className={styles.layerHeader}>
                       <h4>Layers</h4>
@@ -621,7 +630,7 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
                           onClick={toggleAllLayers} 
                           title={allLayersVisible ? "Hide All Layers" : "Show All Layers"}
                           className={styles.masterLayerToggle}
-                          disabled={uniqueLayerNames.length === 0} // Disable if no layers
+                          disabled={uniqueLayerNames.length === 0}
                       >
                           {allLayersVisible ? "Hide All" : "Show All"}
                       </button>
@@ -637,13 +646,12 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
                         >
                           <input
                             type="checkbox"
-                            readOnly // Control checked state via parent div click
+                            readOnly
                             className={styles.layerToggleCheckbox}
                             checked={visibleLayers.has(layerName)}
                           />
                           <span 
                             className={styles.legendColorSwatch} 
-                            // Use layerColors state, provide default if color missing
                             style={{ backgroundColor: `rgba(${(layerColors[layerName] || [128, 128, 128, 180]).join(',')})` }}
                           ></span>
                           <span className={styles.layerNameText}>{layerName}</span>
