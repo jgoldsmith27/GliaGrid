@@ -2,56 +2,60 @@ import React from 'react';
 import styles from './ScaleBar.module.css';
 
 interface ScaleBarProps {
+  /** The current zoom level of the deck.gl OrthographicView (zoom = log2(pixels/world_unit)). */
   currentZoom: number;
+  /** The number of world coordinate units that correspond to one micrometer (µm). 
+   *  Based on analysis, this is typically 2 for this application (1 µm = 2 units). */
   unitsPerMicron: number;
-  targetPixelWidth?: number; // Approximate desired width of the bar on screen
+  /** The approximate desired width of the scale bar in screen pixels. Defaults to 100. */
+  targetPixelWidth?: number; 
 }
 
-const NICE_MICRON_VALUES = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000];
-
+/**
+ * Renders a dynamic scale bar overlay for a deck.gl OrthographicView.
+ * It calculates an appropriate length and label (in µm) based on the current zoom level
+ * and the known relationship between world coordinate units and micrometers.
+ * The displayed value is rounded to the nearest whole micron.
+ */
 const ScaleBar: React.FC<ScaleBarProps> = ({
   currentZoom,
-  unitsPerMicron,
+  unitsPerMicron, // e.g., 2 units = 1 µm
   targetPixelWidth = 100, // Aim for a bar around 100px wide
 }) => {
-  // Calculate how many world units fit into the targetPixelWidth at the current zoom
-  // targetPixelWidth = worldUnits * Math.pow(2, currentZoom)
-  // worldUnits = targetPixelWidth / Math.pow(2, currentZoom)
-  const worldUnitsForTargetWidth = targetPixelWidth / Math.pow(2, currentZoom);
+  // --- Calculate the Micron Value for the Scale Bar ---
+
+  // 1. Determine the relationship between screen pixels and world units at the current zoom.
+  const pixelsPerWorldUnit = Math.pow(2, currentZoom);
+
+  // 2. Calculate how many world units would correspond to our target pixel width.
+  const worldUnitsForTargetWidth = targetPixelWidth / pixelsPerWorldUnit;
+
+  // 3. Convert this world unit width into micrometers using the provided conversion factor.
   const micronsForTargetWidth = worldUnitsForTargetWidth / unitsPerMicron;
 
-  // Find the "nicest" micron value that is less than or equal to micronsForTargetWidth
-  let bestMicronValue = NICE_MICRON_VALUES[0];
-  for (const niceValue of NICE_MICRON_VALUES) {
-    if (niceValue <= micronsForTargetWidth) {
-      bestMicronValue = niceValue;
-    } else {
-      break; // Stop when we exceed the target
-    }
-  }
-  // If micronsForTargetWidth is very small, we might need to adjust or show a smaller unit (not handled here)
-  if (micronsForTargetWidth < NICE_MICRON_VALUES[0]) {
-      // Potentially handle cases where even 1 micron is too large for the targetPixelWidth
-      // For now, default to smallest, or consider alternative rendering
-      bestMicronValue = NICE_MICRON_VALUES[0]; 
-      // Or, if it's extremely zoomed in, a scale bar might not make sense or needs different logic
-      // This can happen if targetPixelWidth is very small or zoom is very high.
-      // We could also try to find the closest nice value instead of just <=.
-      // For simplicity now, we stick to this.
-  }
+  // 4. Round the calculated micron value to the nearest whole number (minimum 1).
+  //    This will be the value displayed in the label.
+  const scaleBarMicronLength = Math.max(1, Math.round(micronsForTargetWidth));
 
-
-  const scaleBarMicronLength = bestMicronValue;
+  // --- Calculate the Final Pixel Length of the Scale Bar ---
+  
+  // 5. Convert the *rounded* micron length (from step 4) back into world coordinate units.
   const scaleBarCoordinateLength = scaleBarMicronLength * unitsPerMicron;
-  const scaleBarPixelLength = scaleBarCoordinateLength * Math.pow(2, currentZoom);
+  
+  // 6. Convert this world coordinate length into screen pixels at the current zoom.
+  //    This ensures the physical bar length matches the rounded label value.
+  const scaleBarPixelLength = scaleBarCoordinateLength * pixelsPerWorldUnit;
 
-  if (scaleBarPixelLength < 1) { // Avoid rendering a bar that's too small to see
+  // Avoid rendering a bar that's too small to see or has non-positive length.
+  if (scaleBarPixelLength < 1) { 
     return null;
   }
 
   return (
     <div className={styles.scaleBarContainer}>
+      {/* The visible scale bar line, width set by calculated pixel length */}
       <div className={styles.scaleBar} style={{ width: `${scaleBarPixelLength}px` }} />
+      {/* The label showing the corresponding micron length */}
       <div className={styles.scaleBarLabel}>{`${scaleBarMicronLength} µm`}</div>
     </div>
   );

@@ -168,7 +168,15 @@ const getInitialViewState = (ligandData: LigandPoint[], receptorData: PointWithG
         target: [centerX, centerY, 0] as [number, number, number],
         zoom: zoom, 
         minZoom: -10,
-        maxZoom: 10
+        // Set maxZoom limit. Rationale:
+        // - Coordinate units are typically ~2 units/µm.
+        // - Orthographic zoom means pixels = worldUnits * 2^zoom.
+        // - Scatterplot points have a base radius (e.g., 5 units = 2.5 µm).
+        // - At zoom=6, 1 world unit (0.5 µm) = 2^6 = 64 pixels. A 5-unit radius point
+        //   would appear very large (~320px radius before radiusScale/clamping).
+        // - Zooming further overly magnifies the discrete coordinate space without 
+        //   revealing more biological detail relative to point size.
+        maxZoom: 6 
     };
 };
 
@@ -228,15 +236,31 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
       return state;
   }, [data]);
 
-  const [viewState, setViewState] = useState<OrthographicViewState>(initialViewState as OrthographicViewState);
+  // Initialize state including zoom bounds
+  const [viewState, setViewState] = useState<OrthographicViewState>({
+    ...initialViewState,
+    minZoom: initialViewState.minZoom ?? -10,
+    maxZoom: initialViewState.maxZoom ?? 6,
+  } as OrthographicViewState);
 
   useEffect(() => {
-    setViewState(initialViewState as OrthographicViewState);
+    // Update state when initialViewState changes, preserving bounds
+    setViewState({
+        ...initialViewState,
+        minZoom: initialViewState.minZoom ?? -10,
+        maxZoom: initialViewState.maxZoom ?? 6,
+    } as OrthographicViewState);
   }, [initialViewState]);
 
   const onViewStateChange = useCallback(({ viewState: vs }: ViewStateChangeParameters<OrthographicViewState>) => {
-    setViewState(vs as OrthographicViewState);
-  }, []);
+    // Clamp zoom within bounds when updating state
+    let newZoom = vs.zoom;
+    // Clamp zoom only if it's a number, respecting the defined min/max bounds.
+    if (typeof newZoom === 'number') {
+        newZoom = Math.max(initialViewState.minZoom ?? -10, Math.min(initialViewState.maxZoom ?? 6, newZoom));
+    }
+    setViewState({...vs, zoom: newZoom, minZoom: initialViewState.minZoom ?? -10, maxZoom: initialViewState.maxZoom ?? 6 } as OrthographicViewState);
+  }, [initialViewState.minZoom, initialViewState.maxZoom]);
 
   const handleZoom = useCallback((zoomIncrement: number) => {
     setViewState((currentViewState) => {

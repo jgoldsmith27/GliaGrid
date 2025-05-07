@@ -61,9 +61,16 @@ const getInitialViewState = (validBoundaries: Record<string, LayerBoundary>) => 
 
     return {
         target: [centerX, centerY, 0] as [number, number, number],
-        zoom: Math.max(-10, Math.min(10, zoom)), // Clamp zoom within bounds
+        zoom: Math.max(-10, Math.min(10, zoom)), // Clamp initial zoom too
         minZoom: -10,
-        maxZoom: 10
+        // Set maxZoom limit. Rationale:
+        // - Coordinate units are typically ~2 units/µm.
+        // - Orthographic zoom means pixels = worldUnits * 2^zoom.
+        // - At zoom=6, 1 world unit (0.5 µm) = 2^6 = 64 pixels.
+        // - Zooming further overly magnifies the discrete coordinate space 
+        //   without revealing more biological detail (points become huge blocks).
+        // - This value provides a balance between close inspection and meaningful resolution.
+        maxZoom: 6 
     };
 };
 
@@ -85,16 +92,18 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
   // Use useJobStatus to get the final analysis results
   const { jobStatus, isLoading: isJobStatusLoading, error: jobStatusError } = useJobStatus(jobId);
 
+  // --- State --- 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [visibleLayers, setVisibleLayers] = useState<Set<string>>(new Set());
   const [layerColors, setLayerColors] = useState<Record<string, Color>>({});
   const [uniqueLayerNames, setUniqueLayerNames] = useState<string[]>([]);
   const [rawLayerBoundaries, setRawLayerBoundaries] = useState<Record<string, LayerBoundary | null>>({});
-
-  // --- Lasso State --- 
   const [isDrawingLasso, setIsDrawingLasso] = useState(false);
   const [lassoPoints, setLassoPoints] = useState<[number, number][]>([]);
+
+  // --- Refs --- 
   const isDragging = useRef(false);
+  const deckContainerRef = useRef<HTMLDivElement>(null); // MOVED: Hook call moved before conditional returns
 
   // Process JOB RESULTS to find unique layers, assign colors, and get boundaries
   useEffect(() => {
@@ -147,9 +156,14 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
       return getInitialViewState(validBoundaries);
   }, [rawLayerBoundaries]); // Depend on the raw boundaries state
 
-  const [viewState, setViewState] = useState<OrthographicViewState>(initialViewState);
+  // Initialize state with computed initial values and bounds
+  const [viewState, setViewState] = useState<OrthographicViewState>({
+      ...initialViewState, // Spread calculated target and initial zoom
+      minZoom: initialViewState.minZoom ?? -10,
+      maxZoom: initialViewState.maxZoom ?? 6,
+  });
 
-  // Reset view state when initial view state calculation changes
+  // Reset view state when initial view state calculation changes (e.g., data loads)
   useEffect(() => {
        // Check if viewState and target exist before comparing
        if (viewState && viewState.target && 
@@ -161,11 +175,16 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
   }, [initialViewState, viewState]); // Add viewState dependency
 
   const onViewStateChange = useCallback(({ viewState: vs }: ViewStateChangeParameters<OrthographicViewState>) => {
-    // Prevent view state change while drawing lasso
     if (!isDrawingLasso || !isDragging.current) {
-        setViewState(vs as OrthographicViewState);
+        let newZoom = vs.zoom;
+        // Clamp zoom only if it's a number, respecting the defined min/max bounds.
+        if (typeof newZoom === 'number') {
+            newZoom = Math.max(initialViewState.minZoom ?? -10, Math.min(initialViewState.maxZoom ?? 6, newZoom));
+        }
+        // Update state, ensuring bounds are preserved
+        setViewState({...vs, zoom: newZoom, minZoom: initialViewState.minZoom ?? -10, maxZoom: initialViewState.maxZoom ?? 6 });
     }
-  }, [isDrawingLasso]);
+  }, [isDrawingLasso, initialViewState.minZoom, initialViewState.maxZoom]);
 
   const toggleLayerVisibility = useCallback((layerName: string) => {
     setVisibleLayers(prev => {
@@ -364,7 +383,7 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
   }
 
   // Main Render
-  const deckContainerRef = useRef<HTMLDivElement>(null); // Ref for the DeckGL container
+  // REMOVED: const deckContainerRef = useRef<HTMLDivElement>(null);
 
   return (
     <div ref={deckContainerRef} className={`${styles.spatialOverviewContainer} ${isFullscreen ? styles.fullscreen : ''}`}>
