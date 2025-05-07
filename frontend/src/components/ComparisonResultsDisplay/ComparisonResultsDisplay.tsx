@@ -261,35 +261,39 @@ const ComparisonResultsDisplay: React.FC<ComparisonResultsDisplayProps> = ({
                 <AccordionDetails>
                   <Typography variant="subtitle1" gutterBottom>Understanding Molecular Comparison Results:</Typography>
                   <Box sx={{ ml: 2, mb: 2 }}>
-                    <Typography variant="body1" paragraph>
+                    <Typography variant="body1">
                       <strong>Normalized Mean Values</strong> - Average expression level for each molecule in the selected regions, 
                       normalized to account for differences in total counts. Very small values may appear as 0.000 but have tooltips showing the actual value.
                     </Typography>
-                    <Typography variant="body1" paragraph>
+                    
+                    <Typography variant="body1" sx={{mt: 1}}>
                       <strong>Log₂FC (Log2 Fold Change)</strong> - Shows how much expression differs between selections:
-                      <Box component="ul" sx={{ mt: 1, mb: 1 }}>
-                        <li>Positive values (🔼) indicate <strong>higher expression in Selection 2</strong></li>
-                        <li>Negative values (🔽) indicate <strong>higher expression in Selection 1</strong></li>
-                        <li>The value is shown alongside the actual fold change (e.g., "2×" means "twice as much")</li>
-                      </Box>
                     </Typography>
-                    <Typography variant="body1" paragraph>
+                    <Box component="ul" sx={{ mt: 1, mb: 1, pl: 2 }}>
+                      <li>Positive values (🔼) indicate <strong>higher expression in Selection 2</strong></li>
+                      <li>Negative values (🔽) indicate <strong>higher expression in Selection 1</strong></li>
+                      <li>The value is shown alongside the actual fold change (e.g., "2×" means "twice as much")</li>
+                    </Box>
+                    
+                    <Typography variant="body1" sx={{mt: 1}}>
                       <strong>q-value</strong> - The statistical significance (false discovery rate corrected p-value):
-                      <Box component="ul" sx={{ mt: 1, mb: 1 }}>
-                        <li>* (q &lt; 0.05) - Significant</li>
-                        <li>** (q &lt; 0.01) - Highly significant</li>
-                        <li>*** (q &lt; 0.001) - Extremely significant</li>
-                      </Box>
                     </Typography>
-                    <Typography variant="body1" paragraph>
+                    <Box component="ul" sx={{ mt: 1, mb: 1, pl: 2 }}>
+                      <li>* (q &lt; 0.05) - Significant</li>
+                      <li>** (q &lt; 0.01) - Highly significant</li>
+                      <li>*** (q &lt; 0.001) - Extremely significant</li>
+                    </Box>
+                    
+                    <Typography variant="body1" sx={{mt: 1}}>
                       <strong>Types</strong> - Molecules are classified as:
-                      <Box component="ul" sx={{ mt: 1, mb: 1 }}>
-                        <li><strong>Ligands</strong> - Signaling molecules that are released by cells</li>
-                        <li><strong>Receptors</strong> - Cell surface proteins that bind to ligands</li>
-                        <li><strong>L-R Pairs</strong> - Ligand-receptor interactions that may indicate cell-cell communication</li>
-                      </Box>
                     </Typography>
-                    <Typography variant="body1">
+                    <Box component="ul" sx={{ mt: 1, mb: 1, pl: 2 }}>
+                      <li><strong>Ligands</strong> - Signaling molecules that are released by cells</li>
+                      <li><strong>Receptors</strong> - Cell surface proteins that bind to ligands</li>
+                      <li><strong>L-R Pairs</strong> - Ligand-receptor interactions that may indicate cell-cell communication</li>
+                    </Box>
+                    
+                    <Typography variant="body1" sx={{mt: 1}}>
                       <strong>Biological Interpretation:</strong> Differential expression may suggest region-specific functions, 
                       cell type differences, or responses to environmental cues.
                     </Typography>

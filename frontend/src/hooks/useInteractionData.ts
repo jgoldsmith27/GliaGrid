@@ -61,6 +61,17 @@ const useInteractionData = (
     // Get the shared data store instance
     const dataStore = useSharedData();
 
+    // Moved getFetchParamsHash earlier to be available for the useEffect cleanup
+    const getFetchParamsHash = useCallback((
+        jobId: string | null, 
+        selectedPair: [string, string] | null, 
+        apiScopeName: string | null,
+        lassoCoords: [number, number][] | null
+    ): string => {
+        const polygonKey = lassoCoords ? 'withPolygon' : 'noPolygon';
+        return `${jobId}_${selectedPair?.[0]}_${selectedPair?.[1]}_${apiScopeName}_${polygonKey}`;
+    }, []);
+
     // Update stable refs with current values
     useEffect(() => {
         selectedPairRef.current = selectedPair;
@@ -70,30 +81,43 @@ const useInteractionData = (
         lassoCoordsRef.current = lassoCoords;
     }, [lassoCoords]);
 
-    // Ensure cleanup on unmount
+    // Effect to track true component mount/unmount for isMountedRef
     useEffect(() => {
+        isMountedRef.current = true;
+        console.log(`[${hookInstanceId.current}] Component mounted, isMountedRef set to true.`);
         return () => {
             isMountedRef.current = false;
-            // Clear any pending timers
-            if (debounceTimerRef.current !== null) {
-                window.clearTimeout(debounceTimerRef.current);
-                debounceTimerRef.current = null;
-            }
-            // Abort any in-progress fetches
-            if (abortControllerRef.current) {
-                abortControllerRef.current.abort();
-                abortControllerRef.current = null;
-            }
-            
-            // Remove this instance from the active visualizations map
-            if (jobId && selectedPair) {
-                const visKey = `${jobId}_${selectedPair.join('_')}_${apiScopeName}`;
-                if (activeVisualizations.get(visKey)?.signal === abortControllerRef.current?.signal) {
-                    activeVisualizations.delete(visKey);
-                }
-            }
+            console.log(`[${hookInstanceId.current}] Component unmounted, isMountedRef set to false.`);
+            // Note: Other cleanup like aborting fetches / clearing timers specific to dependency changes
+            // should be handled in their respective useEffect cleanups (e.g., the main data fetching useEffect).
         };
-    }, [jobId, selectedPair, apiScopeName]);
+    }, []); // Empty dependency array means this runs once on mount and cleanup on unmount
+
+    // Ensure cleanup on unmount (Original effect, check if still needed or if its logic is covered)
+    // useEffect(() => {
+    //     return () => {
+    //         // isMountedRef.current = false; // This is now handled by the effect above
+    //         if (debounceTimerRef.current !== null) {
+    //             window.clearTimeout(debounceTimerRef.current);
+    //             debounceTimerRef.current = null;
+    //         }
+            
+    //         const controller = abortControllerRef.current;
+    //         if (controller) {
+    //             console.log(`[${hookInstanceId.current}] Old Cleanup Effect: Aborting fetch.`);
+    //             controller.abort(); 
+    //             abortControllerRef.current = null; 
+    //         }
+            
+    //         if (jobId && selectedPairRef.current) {
+    //             const paramsHashForCleanup = getFetchParamsHash(jobId, selectedPairRef.current, apiScopeName, lassoCoordsRef.current);
+    //             const visKey = paramsHashForCleanup;
+    //             if (activeVisualizations.get(visKey)?.signal === controller?.signal) {
+    //                 activeVisualizations.delete(visKey);
+    //             }
+    //         }
+    //     };
+    // }, [jobId, apiScopeName, getFetchParamsHash]); // getFetchParamsHash is now defined above
 
     const cancelFetch = useCallback(() => {
         if (abortControllerRef.current) {
@@ -113,18 +137,10 @@ const useInteractionData = (
         }
     }, []);
 
-    // Create a hash of the current fetch params to detect duplicate fetches
-    const getFetchParamsHash = useCallback((
-        jobId: string | null, 
-        selectedPair: [string, string] | null, 
-        apiScopeName: string | null,
-        lassoCoords: [number, number][] | null
-    ): string => {
-        const polygonKey = lassoCoords ? 'withPolygon' : 'noPolygon';
-        return `${jobId}_${selectedPair?.[0]}_${selectedPair?.[1]}_${apiScopeName}_${polygonKey}`;
-    }, []);
-
     const fetchInteractionData = useCallback(async () => {
+        // ADDED LOGGING
+        console.log(`[${hookInstanceId.current}] fetchInteractionData called.`);
+        
         // Prevent executing if component is unmounted
         if (!isMountedRef.current) return;
         
@@ -156,10 +172,11 @@ const useInteractionData = (
         }
 
         // Check if another visualization is already fetching this exact data
-        const visKey = `${jobId}_${currentSelectedPair.join('_')}_${apiScopeName}`;
+        // MODIFIED visKey to include paramsHash for more specificity (includes lasso status)
+        const visKey = paramsHash; // Use the more specific paramsHash as the key
         const existingController = activeVisualizations.get(visKey);
         if (existingController && !existingController.signal.aborted) {
-            console.log(`[${hookInstanceId.current}] Another visualization is already fetching this data, waiting for it to complete`);
+            console.log(`[${hookInstanceId.current}] Another visualization is already fetching this data (key: ${visKey}), waiting for it to complete`);
             // Don't start a new fetch, let the existing one finish
             return;
         }
@@ -279,7 +296,8 @@ const useInteractionData = (
                  setIsLoading(false);
                  
                  // Remove from active visualizations map
-                 const visKey = `${jobId}_${currentSelectedPair.join('_')}_${apiScopeName}`;
+                 // MODIFIED visKey to include paramsHash
+                 const visKey = getFetchParamsHash(jobId, currentSelectedPair, apiScopeName, currentLassoCoords);
                  activeVisualizations.delete(visKey);
             }
         }
@@ -313,52 +331,24 @@ const useInteractionData = (
         lassoCoords: null
     });
 
-    // Effect to trigger fetch when dependencies change
+    // Effect to trigger fetch when dependencies change (AGRESSIVE DEBUG VERSION)
     useEffect(() => {
-        // Don't trigger fetch if the component is unmounted
-        if (!isMountedRef.current) return;
+        const hookId = hookInstanceId.current; // For stable logging
+        console.log(`[${hookId}] AGGRESSIVE DEBUG: useEffect triggered. JobId: ${jobId}, Pair: ${selectedPair?.join('-')}, Scope: ${apiScopeName}, Lasso?: ${!!lassoCoords}`);
         
-        // Deep compare current params with previous params to prevent unnecessary fetches
-        const currentParams = {
-            jobId,
-            selectedPair,
-            apiScopeName,
-            lassoCoords
-        };
-        
-        // Skip if params haven't changed (using deep equality)
-        if (isEqual(currentParams, prevParamsRef.current)) {
+        // This check should now be more reliable due to the dedicated mount effect
+        if (!isMountedRef.current) {
+            console.log(`[${hookId}] AGGRESSIVE DEBUG: isMountedRef is false, returning.`);
             return;
         }
         
-        // Update previous params
-        prevParamsRef.current = currentParams;
-        
-        // Create a hash of the current fetch params
-        const paramsHash = getFetchParamsHash(jobId, selectedPair, apiScopeName, lassoCoords);
-        
-        // Only fetch if we have valid fetch parameters and are not already fetching these params
-        if (jobId && selectedPair && (currentFetchParamsRef.current !== paramsHash || !fetchInProgressRef.current)) {
-            console.log(`[${hookInstanceId.current}] Effect triggered fetch for ${selectedPair.join('-')}, scope: ${apiScopeName}, params hash: ${paramsHash}`);
+        if (jobId && selectedPair) {
+            console.log(`[${hookId}] AGGRESSIVE DEBUG: Valid JobId & SelectedPair. Proceeding to call debouncedFetch.`);
             debouncedFetch();
+        } else {
+            console.log(`[${hookId}] AGGRESSIVE DEBUG: Invalid JobId or SelectedPair. Not calling debouncedFetch. JobId: ${jobId}, Pair: ${selectedPair}`);
         }
-
-        // Cleanup function to abort request when dependencies change or component unmounts
-        return () => {
-             if (abortControllerRef.current) {
-                  console.log(`[${hookInstanceId.current}] Cleanup: Aborting fetch.`);
-                  abortControllerRef.current.abort();
-                  abortControllerRef.current = null;
-                  fetchInProgressRef.current = false;
-             }
-             
-             // Also clear any pending debounced fetches
-             if (debounceTimerRef.current !== null) {
-                 window.clearTimeout(debounceTimerRef.current);
-                 debounceTimerRef.current = null;
-             }
-        };
-    }, [jobId, selectedPair, apiScopeName, lassoCoords, debouncedFetch, getFetchParamsHash, hookInstanceId]);
+    }, [jobId, selectedPair, apiScopeName, lassoCoords, debouncedFetch]);
 
     return { interactionVizData, isLoading, error, warnings, fetchInteractionData, cancelFetch };
 };

@@ -290,18 +290,8 @@ export class SharedDataStore {
         return;
     }
     
-    // Add listener within handleRequest scope as well
-    const abortHandler = () => {
-        console.log(`[SharedDataStore] Abort signal received during handleRequest for: ${cacheKey}`);
-        // Reject the promise associated with this specific request
-        reject(new DOMException('Request aborted', 'AbortError'));
-        this.loadingPromises.delete(cacheKey); // Ensure cleanup
-    };
-    signal?.addEventListener('abort', abortHandler);
-
     try {
         // 1. Get Job Metadata (which includes file IDs and mappings)
-        // Potentially check signal?.aborted after async operations
         const metadata = await this.getJobMetadata(jobId); 
         if (signal?.aborted) throw new DOMException('Request aborted', 'AbortError'); 
         
@@ -373,8 +363,7 @@ export class SharedDataStore {
 
         const spatialDataResult = await window.electronAPI.readBackendFile(
             spatialFileId, 
-            backendOptions, // Pass constructed options
-            signal // Pass signal as the third argument
+            backendOptions // Pass constructed options
         );
         
         // Check if aborted immediately after the potentially long operation
@@ -454,9 +443,6 @@ export class SharedDataStore {
           }
           // Ensure cleanup happens regardless of error type
           this.loadingPromises.delete(cacheKey); 
-      } finally {
-          // Always remove the listener when handleRequest finishes
-           signal?.removeEventListener('abort', abortHandler);
       }
   }
 
