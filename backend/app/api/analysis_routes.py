@@ -15,7 +15,9 @@ from app.services.analysis_service import AnalysisService
 from app.models.analysis_models import (
     AnalysisMapping, AnalysisPayload, 
     CustomLassoAnalysisRequest, # Use updated request model
-    CustomAnalysisResultsBundle # Use NEW bundle response model
+    CustomAnalysisResultsBundle, # Use NEW bundle response model
+    ComparisonRequest, ComparisonResponse, ComparisonResults, DifferentialExpressionResult, # New imports
+    ComparisonJobResponse # ADDED: Import ComparisonJobResponse
 )
 # Import core analysis logic directly
 from app.analysis_logic.core import run_stage1_counts_pipeline, run_pathway_dominance_pipeline, run_module_context_pipeline
@@ -218,5 +220,56 @@ async def run_custom_analysis_endpoint(
         logger.exception(f"Unexpected error during custom analysis endpoint for job {job_id}: {e}")
         logger.debug(f"[Custom Analysis {job_id}] Endpoint failed after {time.time() - request_start_time:.4f} seconds.") # DEBUG
         raise HTTPException(status_code=500, detail="An unexpected error occurred during custom analysis.")
+
+# --- ADDED: Endpoint for Comparison Analysis --- #
+
+@router.post("/compare", response_model=ComparisonJobResponse)
+async def compare_selections(
+    background_tasks: BackgroundTasks,
+    request: ComparisonRequest = Body(...),
+    job_service: JobService = Depends(get_job_service),
+    analysis_service: AnalysisService = Depends(get_analysis_service)
+):
+    """
+    Initiates a comparative analysis between two defined selections as a background task.
+    Returns a job ID for tracking progress.
+    """
+    try:
+        # Log the received request for debugging
+        # Limit logging of potentially large selection data for production
+        log_payload = request.model_dump(exclude={'selection1': {'definition': {'polygon_coords'}}, 'selection2': {'definition': {'polygon_coords'}}})
+        logger.info(f"Received comparison request: {log_payload.get('comparison_name', 'Untitled')}")
+
+        # Create a job ID for this comparison task
+        # REMOVED job_type='comparison' as it's not an expected parameter by JobService.create_job
+        job_id = job_service.create_job(
+            initial_context={
+                "request_data": request.model_dump()  # Store the original request
+            }
+        )
+        logger.info(f"Comparison job created with ID: {job_id}")
+
+        # Add the background task
+        background_tasks.add_task(
+            analysis_service.run_comparison_background, 
+            job_id, 
+            request # Pass the full request object to the background task
+        )
+        
+        # 3. Return the Job ID response
+        return ComparisonJobResponse(
+            status="pending", 
+            message="Comparison job started in background.", 
+            job_id=job_id
+        )
+        
+    except Exception as e:
+        # Catch potential errors during job creation/enqueueing
+        logger.exception(f"Failed to start comparison job: {e}")
+        # Return an error response appropriate for the job response model, or raise HTTPException
+        # Raising HTTPException might be clearer if starting the job itself fails.
+        raise HTTPException(status_code=500, detail=f"Failed to start comparison job: {str(e)}")
+
+# --- END: Endpoint for Comparison Analysis --- #
 
 # --- Other potential helper functions or endpoints --- 

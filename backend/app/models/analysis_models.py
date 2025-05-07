@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
-from typing import Dict, Optional, List, Any
+from typing import Dict, Optional, List, Any, Literal
+import uuid
 
 # Pydantic model for the mapping part of the payload
 class AnalysisMapping(BaseModel):
@@ -72,4 +73,77 @@ class CustomAnalysisResultsBundle(BaseModel):
     # Dictionary where keys are layer names (str)
     # and values are the results for that layer within the lasso.
     # Optional: Will be empty if no layers found or layer analysis fails.
-    layered_results: Dict[str, CustomAnalysisScopeResult] = Field(default_factory=dict) 
+    layered_results: Dict[str, CustomAnalysisScopeResult] = Field(default_factory=dict)
+
+# --- ADDED: Models for Comparison Analysis --- #
+
+class FileSet(BaseModel):
+    spatialFileId: Optional[str] = None
+    interactionsFileId: Optional[str] = None
+    modulesFileId: Optional[str] = None
+
+class MappingSet(BaseModel):
+    # Use the existing AnalysisMapping model for structure consistency
+    spatialMapping: Optional[AnalysisMapping] = None 
+    interactionsMapping: Optional[AnalysisMapping] = None
+    modulesMapping: Optional[AnalysisMapping] = None
+
+class SelectionDefinition(BaseModel):
+    layer_name: Optional[str] = None
+    polygon_coords: Optional[List[List[float]]] = None # List of [x, y] coordinates
+
+class SelectionData(BaseModel):
+    source_job_id: Optional[str] = None # Original job ID, if relevant
+    files: FileSet
+    type: Literal['whole_tissue', 'layer', 'lasso'] 
+    definition: SelectionDefinition
+    mappings: MappingSet
+
+class ComparisonRequest(BaseModel):
+    comparison_name: Optional[str] = Field(None, description="Optional user-defined name for the comparison")
+    selection1: SelectionData
+    selection2: SelectionData
+    # Define parameters for the analysis - simplified to FDR threshold as per user request
+    fdr_threshold: float = Field(0.05, ge=0, le=1, description="False Discovery Rate threshold for significance")
+    # analyses_to_perform: List[Dict[str, Any]] # Removed - using simplified approach
+
+# Define structures for comparison results (adjust as needed)
+class DifferentialExpressionResult(BaseModel):
+    molecule_id: str
+    # UPDATED: More specific molecule types, including new ones
+    type: Literal[
+        'single_ligand', 
+        'single_receptor', 
+        'complex_ligand', 
+        'complex_receptor', 
+        'ligand_receptor_pair', 
+        'ligand_and_receptor', # NEW
+        'unknown' # NEW (replaces 'other' for individual molecules)
+    ]
+    log2_fold_change: Optional[float] = None # Log2 Fold Change (Selection2 / Selection1)
+    p_value: Optional[float] = None # Raw p-value from test
+    q_value: Optional[float] = None # FDR adjusted p-value
+    mean_selection1: Optional[float] = None # Mean normalized value/count in selection 1
+    mean_selection2: Optional[float] = None # Mean normalized value/count in selection 2
+    # Add flags for complex? depends on implementation
+    # ADDED: Fields for L-R pair components
+    ligand_id: Optional[str] = None
+    receptor_id: Optional[str] = None
+
+class ComparisonResults(BaseModel):
+    differential_expression: List[DifferentialExpressionResult] = []
+    # Add other result types here if needed later
+
+class ComparisonResponse(BaseModel):
+    comparison_id: str = Field(default_factory=lambda: f"comp_{uuid.uuid4()}", description="Unique ID for this comparison run")
+    results: ComparisonResults
+    errors: List[str] = []
+
+# --- END: Models for Comparison Analysis --- #
+
+# --- ADDED: Model for initiating comparison job --- #
+class ComparisonJobResponse(BaseModel):
+    status: str = Field(..., description="Status of the comparison job initiation")
+    message: str = Field(..., description="A message detailing the status or next steps")
+    job_id: Optional[str] = Field(None, description="Job ID for tracking the asynchronous comparison task")
+# --- END: Model for initiating comparison job --- # 
