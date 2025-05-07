@@ -38,24 +38,56 @@ h1 {
   line-height: 1.1;
 }
 
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
-  cursor: pointer;
-  transition: border-color 0.25s;
+/* Global Button Styles */
+button,
+.MuiButton-root {
+    padding: 8px 16px !important; /* Use !important cautiously, but MUI can be specific */
+    background-color: #f1f5f9 !important;
+    border: 1px solid #cbd5e1 !important;
+    border-radius: 6px !important;
+    font-size: 0.9em !important; 
+    font-weight: 500 !important;
+    cursor: pointer !important;
+    transition: background-color 0.2s, border-color 0.2s, color 0.2s !important;
+    text-transform: none !important; /* Override MUI default ALL CAPS */
+    line-height: 1.5 !important;
+    color: #334155 !important; /* Default text color */
+    --variant-textColor: #334155 !important; /* Override MUI CSS variable */
 }
-button:hover {
-  border-color: #646cff;
+
+button:hover,
+.MuiButton-root:hover {
+    background-color: #e2e8f0 !important;
+    border-color: #94a3b8 !important;
+    color: #1e293b !important; /* Hover text color */
+    --variant-textColor: #1e293b !important; /* Override MUI CSS variable for hover */
 }
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
+
+/* Specific override for MUI text variant if the above isn't enough due to MuiButton-text class */
+.MuiButton-text {
+    color: #334155 !important;
+    --variant-textColor: #334155 !important;
 }
+
+.MuiButton-text:hover {
+    color: #1e293b !important;
+    --variant-textColor: #1e293b !important;
+    /* MUI text buttons might have a transparent background hover by default, ensure our bg applies */
+    background-color: #e2e8f0 !important; 
+}
+
+/* If you have other MUI button variants like 'contained' or 'outlined', 
+   they will also inherit these base styles. You might need to add 
+   specific global overrides for them if you want them to look different. 
+   For example:
+.MuiButton-contained {
+    background-color: #007bff !important; 
+    color: white !important;
+}
+.MuiButton-contained:hover {
+    background-color: #0056b3 !important;
+}
+*/
 
 @media (prefers-color-scheme: light) {
   :root {

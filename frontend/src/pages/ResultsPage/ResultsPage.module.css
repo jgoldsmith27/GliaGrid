@@ -189,3 +189,16 @@ progress::-moz-progress-bar {
     transform: translate(14px, -5px) scale(0.75) !important; 
 }
 */ 
+
+.placeholderText {
+    text-align: center;
+    margin-top: 20px;
+    color: #777;
+}
+
+/* If the button is directly within a flex container and needs to not stretch */
+/* This class might still be useful if you have specific layout needs 
+   for button containers elsewhere, or can be removed if not used. */
+.compareScopeButtonContainer > .compareScopeButton { /* If renaming or removing, ensure this selector is updated or removed */
+    align-self: flex-start; /* Or center, depending on desired alignment */
+} 

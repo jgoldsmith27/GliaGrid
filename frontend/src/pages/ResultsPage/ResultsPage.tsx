@@ -16,7 +16,7 @@ import SpatialOverviewVisualization from '../../components/SpatialOverviewVisual
 // ADDED: Import types/hooks needed for decoupled viz fetch
 import { SharedDataStore, useSharedData, DataRequestOptions } from '../../services/data/SharedDataStore';
 import { InteractionVisualizationData } from '../../hooks/useInteractionData'; // Assuming type is exported
-import { Tab, Tabs, Box, Typography, CircularProgress, Alert } from '@mui/material';
+import { Tab, Tabs, Box, Typography, CircularProgress, Alert, Button } from '@mui/material';
 // ADD TextField for search inputs
 import TextField from '@mui/material/TextField';
 
@@ -522,6 +522,60 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
     </div>
   );
 
+  // --- ADDED: Handler to initiate comparison ---
+  const handleInitiateComparison = () => {
+    if (!jobStatus?.results?.inputs) {
+        console.error("[ResultsPage] Job status or input data not available for comparison.");
+        // TODO: Optionally show a user-facing error (e.g., using a snackbar)
+        alert("Cannot initiate comparison: Job data is missing.");
+        return;
+    }
+
+    const inputs = jobStatus.results.inputs;
+    // Assuming 'spatialFileId' is the key for the primary data file used in the initial analysis
+    const spatialFileId = inputs.files?.spatialFileId; 
+    const spatialMapping = inputs.mappings?.spatialMapping;
+
+    if (!spatialFileId || !spatialMapping) {
+        console.error("[ResultsPage] File ID or column mappings not found in job status for comparison.", { spatialFileId, spatialMapping });
+        // TODO: Optionally show a user-facing error
+        alert("Cannot initiate comparison: File ID or column mappings are missing.");
+        return;
+    }
+
+    let definition: Record<string, any> = {}; // Ensure definition is Record<string, any> or a more specific type
+    if (selectedScope === 'layers') {
+        if (!selectedLayer) {
+            console.error("[ResultsPage] Layer not selected for comparison.");
+            alert("Please select a layer to compare.");
+            return; 
+        }
+        definition = { layer_name: selectedLayer };
+    } else if (selectedScope === 'custom') {
+        if (!lassoCoords || lassoCoords.length === 0) {
+            console.error("[ResultsPage] Lasso selection not defined for comparison.");
+            alert("Please make a custom selection (lasso) to compare.");
+            return; 
+        }
+        definition = { polygon_coords: lassoCoords };
+    }
+    // For 'whole_tissue', definition remains {} as per plan
+
+    const selection1Data = {
+        source_job_id: jobId, // From useParams
+        file_id: spatialFileId,
+        type: selectedScope as ScopeType, // Cast selectedScope to ScopeType
+        definition: definition,
+        column_mappings: spatialMapping 
+    };
+
+    console.log("[ResultsPage] Initiating comparison with Selection 1:", selection1Data);
+    // TODO: Navigate to Comparison Tool UI, passing selection1Data
+    // Example: navigate('/comparison-tool', { state: { selection1: selection1Data } });
+    navigate('/comparison', { state: { selection1: selection1Data } });
+  };
+  // --- End of ADDED Handler ---
+
   return (
     <div className={styles.resultsPageLayout}> {/* New overall layout class */} 
       {/* Back Button Container - Added */}
@@ -534,17 +588,30 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
       {/* Control Area */}
       <div className={styles.controlArea}>
         <h3>Scope & Settings</h3>
-        <div className={styles.controlGroup}>
-           {/* Remove this label */}
-           {/* <label className={styles.controlLabel}>Analysis Scope:</label> */}
-            <ScopeSelector 
-                selectedScope={selectedScope} 
-                onScopeChange={handleScopeChange} 
-            />
-        </div>
-        
-        {/* Conditionally render the Layer Selector container */} 
-        {selectedScope === 'layers' && (
+        <div className={styles.leftPanel}>
+          <ScopeSelector selectedScope={selectedScope} onScopeChange={handleScopeChange} />
+          
+          {/* --- ADDED: Comparison Buttons --- */}
+          <Box sx={{ pt: 1, pb: 1, display: 'flex', flexDirection: 'column', gap: 1, alignItems: 'flex-start' }}>
+            {selectedScope === 'whole_tissue' && jobStatus?.results?.inputs?.files?.spatialFileId && jobStatus?.results?.inputs?.mappings?.spatialMapping && (
+                <Button onClick={handleInitiateComparison}>
+                    Compare Whole Tissue
+                </Button>
+            )}
+            {selectedScope === 'layers' && selectedLayer && jobStatus?.results?.inputs?.files?.spatialFileId && jobStatus?.results?.inputs?.mappings?.spatialMapping && (
+                <Button onClick={handleInitiateComparison}>
+                    Compare Layer: {selectedLayer}
+                </Button>
+            )}
+            {selectedScope === 'custom' && lassoCoords && lassoCoords.length > 0 && jobStatus?.results?.inputs?.files?.spatialFileId && jobStatus?.results?.inputs?.mappings?.spatialMapping && (
+                 <Button onClick={handleInitiateComparison}>
+                    Compare Custom Selection
+                </Button>
+            )}
+          </Box>
+          {/* --- End of ADDED Comparison Buttons --- */}
+          
+          {selectedScope === 'layers' && (
             <div className={styles.layerSelectorContainer}> {/* Wrapper Div */} 
                 <LayerSelector 
                     availableLayers={availableLayers} 
@@ -556,12 +623,13 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
                     }} 
                 />
             </div>
-        )}
-        
-        {/* Conditionally render search bars in Control Area for non-custom scopes */}
-        {selectedScope !== 'custom' && searchBarInputs}
-        
-         {/* Add other filters/settings here later */}
+          )}
+          
+          {/* Conditionally render search bars in Control Area for non-custom scopes */}
+          {selectedScope !== 'custom' && searchBarInputs}
+          
+           {/* Add other filters/settings here later */}
+        </div>
       </div>
 
       {/* Content Area - Render based on selected scope */}
@@ -674,4 +742,6 @@ type CustomAggregationLevel = 'whole_custom' | 'custom_by_layer';
 //     results_by_layer: { [layerName: string]: CustomAnalysisResponse };
 // }
 
+// Added named export for potential use in tests or other components, and default export
+export { ResultsPage };
 export default ResultsPage; 

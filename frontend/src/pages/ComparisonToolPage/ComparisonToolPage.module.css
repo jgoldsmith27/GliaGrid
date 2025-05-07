@@ -1,0 +1,48 @@
+.container {
+    padding: 24px;
+    margin: 20px;
+}
+
+.pageTitle {
+    margin-bottom: 24px !important; /* !important to override MUI if needed */
+    text-align: center;
+}
+
+.selectionBox {
+    padding: 16px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    background-color: #f9f9f9;
+}
+
+.selectionOriginBox {
+    padding: 16px;
+    margin-top: 16px;
+    margin-bottom: 16px;
+    border: 1px dashed #ccc;
+    border-radius: 8px;
+    text-align: center; /* Center buttons */
+}
+
+.preformattedText {
+    background-color: #eee;
+    padding: 8px;
+    border-radius: 4px;
+    white-space: pre-wrap; /* Allow wrapping */
+    word-break: break-all; /* Break long strings */
+    font-size: 0.85em;
+    max-height: 150px; /* Limit height */
+    overflow-y: auto; /* Add scroll for overflow */
+}
+
+.actionButton {
+    /* Styles for primary action buttons, if different from global */
+    /* Example: might want them larger or with specific colors */
+    margin-top: 8px !important; /* Add some top margin if they are stacked or grouped */
+}
+
+.utilityButton {
+    /* Styles for secondary/utility buttons, if different from global */
+    /* Example: smaller, less prominent */
+    margin-top: 8px !important;
+} 
