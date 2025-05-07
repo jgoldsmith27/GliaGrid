@@ -1,20 +1,20 @@
-import React from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import styles from './ComparisonToolPage.module.css';
-import { Box, Typography, Paper, Button, CircularProgress, TextField, Alert, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Tooltip, tableCellClasses, Grid, FormGroup, FormControlLabel, Checkbox, Accordion, AccordionSummary, AccordionDetails } from '@mui/material';
-import { styled } from '@mui/material/styles';
+import { Box, Typography, Paper, Button, CircularProgress, TextField, Alert } from '@mui/material';
 import InfoIcon from '@mui/icons-material/Info';
-import ArrowUpward from '@mui/icons-material/ArrowUpward';
-import ArrowDownward from '@mui/icons-material/ArrowDownward';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 
 // Import hooks and components needed for Selection 2 (same project)
 import useJobStatus from '../../hooks/useJobStatus'; // To get details of selection1's project
 import ScopeSelector, { ScopeType } from '../../components/ScopeSelector/ScopeSelector';
 import LayerSelector from '../../components/LayerSelector/LayerSelector';
 import SpatialOverviewVisualization from '../../components/SpatialOverviewVisualization/SpatialOverviewVisualization';
+import InteractionVisualization from '../../components/InteractionVisualization/InteractionVisualization';
+import useInteractionData from '../../hooks/useInteractionData'; // InteractionVisualizationData might be local to this file or a shared type
 
-// --- Revised Types for Selection Data ---
+import ComparisonResultsDisplay from '../../components/ComparisonResultsDisplay/ComparisonResultsDisplay'; // NEW IMPORT
+
+// --- Revised Types for Selection Data (Keep here if used by parts of ComparisonToolPage not moved out) ---
 interface FileSet {
   spatialFileId?: string;
   interactionsFileId?: string;
@@ -29,39 +29,27 @@ interface MappingSet {
 
 interface SelectionData {
   source_job_id?: string; 
-  files: FileSet; // Changed from file_id: string
+  files: FileSet;
   type: 'whole_tissue' | 'layer' | 'lasso'; 
   definition: {
     layer_name?: string;
     polygon_coords?: [number, number][];
   };
-  mappings: MappingSet; // Changed from column_mappings object
+  mappings: MappingSet;
 }
 // --- End of Revised Types ---
 
-// --- ADDED: Frontend-specific types matching backend response/request shapes ---
-// (We don't import backend models directly to frontend usually)
+// --- Frontend-specific types matching backend response/request shapes (Keep here if used by parts not moved out) ---
 interface DifferentialExpressionResultFE {
     molecule_id: string;
-    type: string; // Keep as string for simplicity on FE, or use specific literals if needed
+    type: string;
     log2_fold_change?: number | null;
     p_value?: number | null;
     q_value?: number | null;
     mean_selection1?: number | null;
     mean_selection2?: number | null;
-    // ADDED for L-R Pair display
     ligand_id?: string;
     receptor_id?: string;
-}
-
-interface ComparisonResultsFE {
-    differential_expression: DifferentialExpressionResultFE[];
-}
-
-interface ComparisonResponseFE {
-    comparison_id: string;
-    results: ComparisonResultsFE;
-    errors: string[];
 }
 
 // Interface for the request payload (matching backend ComparisonRequest)
@@ -74,7 +62,7 @@ interface ComparisonRequestPayload {
 
 // Interface for the job response from /api/analysis/compare
 interface ComparisonJobResponseFE {
-    status: string; // e.g., 'pending'
+    status: string; 
     message: string;
     job_id?: string | null;
 }
@@ -84,173 +72,8 @@ interface ComparisonJobResponseFE {
 interface ComparisonLocationState {
   selection1?: SelectionData;
   newSelectionFor?: 'selection2';
-  selectionData?: SelectionData; // Data coming back from DataInputPage for selection2
+  selectionData?: SelectionData;
 }
-
-// --- Helper function for Log2FC color scale ---
-const getLog2fcColor = (log2fc: number | null | undefined): string => {
-  if (log2fc === null || log2fc === undefined) return 'transparent';
-  
-  // Simple Red/Blue scale - adjust range and colors as needed
-  const maxAbsFc = 2; // Cap the color intensity at Log2FC of +/- 2
-  const intensity = Math.min(Math.abs(log2fc) / maxAbsFc, 1);
-  const alpha = 0.1 + intensity * 0.4; // Opacity from 0.1 to 0.5
-
-  if (log2fc > 0) {
-    // Increased in Sel2 (Red)
-    return `rgba(255, 0, 0, ${alpha})`; 
-  } else if (log2fc < 0) {
-    // Decreased in Sel2 / Increased in Sel1 (Blue)
-    return `rgba(0, 0, 255, ${alpha})`;
-  } else {
-    return 'transparent'; // No change
-  }
-};
-
-// --- Helper function for significance stars ---
-const getSignificanceStars = (qValue: number | null | undefined): string => {
-  if (qValue === null || qValue === undefined) return '';
-  if (qValue < 0.001) return '***';
-  if (qValue < 0.01) return '**';
-  if (qValue < 0.05) return '*';
-  return ''; // Not significant at p < 0.05
-};
-
-// Replace the existing normalization function with this one
-const normalizeExpressionValue = (value: number | null | undefined): { display: string, raw: number } => {
-  if (value === null || value === undefined) {
-    return { display: '-', raw: 0 };
-  }
-  
-  // Just keep the raw value for calculations
-  const raw = value;
-  
-  // Display as percentages for easier comparison
-  // Show as percentage of typical values in this dataset
-  let display = '';
-  
-  // Format as percentage relative to a reference level of 1e-3
-  // This makes small values easier to comprehend
-  const relativePercentage = (value / 1e-3) * 100;
-  
-  if (relativePercentage < 0.01) {
-    display = '<0.01%';
-  } else if (relativePercentage < 0.1) {
-    display = relativePercentage.toFixed(2) + '%';
-  } else if (relativePercentage < 10) {
-    display = relativePercentage.toFixed(1) + '%';
-  } else {
-    display = Math.round(relativePercentage) + '%';
-  }
-  
-  return { display, raw };
-};
-
-// Update the q-value display function with a more intuitive approach
-const formatQValue = (qValue: number | null | undefined): { display: string, significance: string } => {
-  if (qValue === null || qValue === undefined) {
-    return { display: '-', significance: '' };
-  }
-  
-  let significance = '';
-  if (qValue < 0.001) significance = '***';
-  else if (qValue < 0.01) significance = '**';
-  else if (qValue < 0.05) significance = '*';
-  
-  // Format q-value more intuitively
-  let display = '';
-  if (qValue < 0.001) {
-    display = '<0.1%';
-  } else if (qValue < 0.01) {
-    display = '<1%';
-  } else if (qValue < 0.05) {
-    display = '<5%';
-  } else {
-    display = (qValue * 100).toFixed(0) + '%';
-  }
-  
-  return { display, significance };
-};
-
-// Add this new helper function to get colors for different abundance levels
-const getAbundanceColor = (level: string): string => {
-  switch (level) {
-    case 'Very low':
-      return '#9e9e9e'; // Grey
-    case 'Low':
-      return '#81c784'; // Light green
-    case 'Medium-low':
-      return '#4caf50'; // Green
-    case 'Medium':
-      return '#ffa726'; // Orange
-    case 'Medium-high':
-      return '#f57c00'; // Dark orange
-    case 'High':
-      return '#d32f2f'; // Red
-    default:
-      return 'inherit';
-  }
-};
-
-// --- Styled TableCell for padding consistency ---
-const StyledTableCell = styled(TableCell)(({ theme }) => ({
-  [`&.${tableCellClasses.head}`]: {
-    // Optional: Adjust head cell styling if needed
-  },
-  [`&.${tableCellClasses.body}`]: {
-    fontSize: 14, // Default body font size
-    padding: '6px 10px', // Adjust padding for a denser table
-  },
-}));
-
-// Add a Stars component for significance indicators
-const Stars = ({ significance }: { significance: number }) => {
-  if (significance < 0.001) return <span style={{ marginLeft: 4, color: '#1976d2' }}>***</span>;
-  if (significance < 0.01) return <span style={{ marginLeft: 4, color: '#1976d2' }}>**</span>;
-  if (significance < 0.05) return <span style={{ marginLeft: 4, color: '#1976d2' }}>*</span>;
-  return null;
-};
-
-// Add a safe version of the Log2FC formatter
-const safeFormatLog2FC = (log2fc: number | null | undefined): { display: string, foldChange: string, isPositive: boolean } => {
-  if (log2fc === null || log2fc === undefined) {
-    return { display: '-', foldChange: '-', isPositive: false };
-  }
-  
-  const absLog2FC = Math.abs(log2fc);
-  const foldChange = Math.pow(2, absLog2FC).toFixed(1);
-  const isPositive = log2fc > 0;
-  
-  return {
-    display: absLog2FC.toFixed(2),
-    foldChange: `${foldChange}×`,
-    isPositive
-  };
-};
-
-const getDisplayNameAndRole = (item: DifferentialExpressionResultFE): { displayName: string, roleName: string } => {
-  if (item.type === 'ligand_receptor_pair') {
-    return {
-      displayName: `${item.ligand_id || '?'} → ${item.receptor_id || '?'}`,
-      roleName: "L-R Pair"
-    };
-  } else if (item.type === 'single_ligand') {
-    return {
-      displayName: item.molecule_id,
-      roleName: "Ligand"
-    };
-  } else if (item.type === 'single_receptor') {
-    return {
-      displayName: item.molecule_id,
-      roleName: "Receptor"
-    };
-  } else {
-    return {
-      displayName: item.molecule_id,
-      roleName: item.type || "Unknown"
-    };
-  }
-};
 
 const ComparisonToolPage: React.FC = () => {
   const location = useLocation();
@@ -261,44 +84,21 @@ const ComparisonToolPage: React.FC = () => {
   const [selection2, setSelection2] = React.useState<SelectionData | null>(null);
   const [selection2ProjectOrigin, setSelection2ProjectOrigin] = React.useState<'same' | 'different' | null>(null);
   
-  // --- State for defining Selection 2 (if 'same' project) ---
-  const [jobStatusForSelection1Project, setJobStatusForSelection1Project] = React.useState<any | null>(null); // Using any for now, refine with JobStatusData type from useJobStatus
+  const [jobStatusForSelection1Project, setJobStatusForSelection1Project] = React.useState<any | null>(null);
   const [selectedScopeForSelection2, setSelectedScopeForSelection2] = React.useState<ScopeType>('whole_tissue');
   const [availableLayersForSelection2, setAvailableLayersForSelection2] = React.useState<string[]>([]);
   const [selectedLayerForSelection2, setSelectedLayerForSelection2] = React.useState<string | null>(null);
-  const [lassoCoordsForSelection2, setLassoCoordsForSelection2] = React.useState<[number, number][] | null>(null); // Placeholder
+  const [lassoCoordsForSelection2, setLassoCoordsForSelection2] = React.useState<[number, number][] | null>(null);
   
-  // --- State for Analysis Configuration ---
-  // REMOVED complex analysis config state
-  // interface AnalysisParamInput { ... }
-  // interface AnalysisConfig { ... }
-  // const [analysesToPerform, setAnalysesToPerform] = React.useState<AnalysisConfig[]>([]);
-  // const [currentAnalysisType, setCurrentAnalysisType] = React.useState<string>('differential_expression');
-  // const [currentAnalysisParams, setCurrentAnalysisParams] = React.useState<AnalysisParamInput>({ fdr_threshold: 0.05 });
-  
-  // ADDED: State for single FDR threshold parameter
   const [fdrThreshold, setFdrThreshold] = React.useState<number>(0.05);
   
-  // ADDED: State for comparison results and loading/error
-  const [isLoadingComparison, setIsLoadingComparison] = React.useState<boolean>(false);
-  const [comparisonResults, setComparisonResults] = React.useState<ComparisonResponseFE | null>(null); // Use FE type
-  const [comparisonError, setComparisonError] = React.useState<string | null>(null);
+  const [comparisonError, setComparisonError] = React.useState<string | null>(null); // For job submission error
   
-  // ADDED: State specifically for the comparison job ID
   const [comparisonJobId, setComparisonJobId] = React.useState<string | null>(null);
 
-  // ADDED: useJobStatus hook for tracking the comparison job
-  const {
-    jobStatus: comparisonJobDetails,
-    isLoading: isLoadingComparisonJobStatus, 
-    error: comparisonJobError, 
-  } = useJobStatus(comparisonJobId);
-
-  // ADDED: State for the initial API call loading/error
   const [isStartingComparison, setIsStartingComparison] = React.useState<boolean>(false);
   const [startComparisonError, setStartComparisonError] = React.useState<string | null>(null);
 
-  // ADDED: State for live filtering options
   const [filterMinLog2FC, setFilterMinLog2FC] = React.useState<number>(0);
   const [filterMaxQValue, setFilterMaxQValue] = React.useState<number>(0.05);
   const [filterMinMeanValue, setFilterMinMeanValue] = React.useState<number>(0);
@@ -306,95 +106,170 @@ const ComparisonToolPage: React.FC = () => {
   const [showReceptors, setShowReceptors] = React.useState<boolean>(true);
   const [showLRPairs, setShowLRPairs] = React.useState<boolean>(true);
 
-  // --- Effect to set initial selection1 and handle data coming back for selection2 --- 
+  const [selectedMolecule, setSelectedMolecule] = React.useState<{
+    id: string;
+    type: string;
+    ligandId?: string;
+    receptorId?: string;
+  } | null>(null);
+
+  const [isSelection1Fullscreen, setIsSelection1Fullscreen] = useState<boolean>(false);
+  const [isSelection2Fullscreen, setIsSelection2Fullscreen] = useState<boolean>(false);
+
+  const {
+    jobStatus: comparisonJobDetails,
+    isLoading: isLoadingComparisonJobStatus, 
+    error: comparisonJobErrorFromHook, // Renamed to avoid conflict with submission error
+  } = useJobStatus(comparisonJobId);
+  
+  // Combine submission error and hook error if needed, or decide which one to prioritize
+  const displayableComparisonJobError = comparisonJobErrorFromHook || comparisonError;
+
+  const selectedPairMemo = React.useMemo(() => {
+    if (!selectedMolecule) return null;
+    return [
+      selectedMolecule.type === 'ligand_receptor_pair' ? selectedMolecule.ligandId || '' : selectedMolecule.id, 
+      selectedMolecule.type === 'ligand_receptor_pair' ? selectedMolecule.receptorId || '' : selectedMolecule.id
+    ] as [string, string];
+  }, [selectedMolecule]);
+  
+  const selection1Scope = React.useMemo(() => selection1?.type === 'layer' ? 'layers' : 'whole_tissue', [selection1]);
+  const selection1Polygon = React.useMemo(() => selection1?.type === 'lasso' ? selection1.definition.polygon_coords || null : null, [selection1]);
+  const selection2Scope = React.useMemo(() => selection2?.type === 'layer' ? 'layers' : 'whole_tissue', [selection2]);
+  const selection2Polygon = React.useMemo(() => selection2?.type === 'lasso' ? selection2.definition.polygon_coords || null : null, [selection2]);
+  
+  const { 
+    interactionVizData: selection1VizData, 
+    isLoading: isLoadingSelection1Viz, 
+    error: selection1VizError,
+    cancelFetch: cancelSelection1VizFetch
+  } = useInteractionData(selection1?.source_job_id || null, selectedPairMemo, selection1Scope, selection1Polygon);
+  
+  const { 
+    interactionVizData: selection2VizData, 
+    isLoading: isLoadingSelection2Viz, 
+    error: selection2VizError,
+    cancelFetch: cancelSelection2VizFetch
+  } = useInteractionData(selection2?.source_job_id || null, selectedPairMemo, selection2Scope, selection2Polygon);
+  
+  const selection1VizDataMemo = React.useMemo(() => {
+    if (!selection1VizData || !selectedMolecule) return null;
+    return {
+      ligand: selection1VizData.ligand || [],
+      receptor: selection1VizData.receptor.map((p: { layer?: string; x: number; y: number }) => ({ ...p, gene: p.layer || '' })) || [],
+      isComplex: true,
+      receptorName: selectedMolecule.type === 'ligand_receptor_pair' ? selectedMolecule.receptorId || '' : selectedMolecule.id
+    };
+  }, [selection1VizData, selectedMolecule]);
+  
+  const selection2VizDataMemo = React.useMemo(() => {
+    if (!selection2VizData || !selectedMolecule) return null;
+    return {
+      ligand: selection2VizData.ligand || [],
+      receptor: selection2VizData.receptor.map((p: { layer?: string; x: number; y: number }) => ({ ...p, gene: p.layer || '' })) || [],
+      isComplex: true,
+      receptorName: selectedMolecule.type === 'ligand_receptor_pair' ? selectedMolecule.receptorId || '' : selectedMolecule.id
+    };
+  }, [selection2VizData, selectedMolecule]);
+
+  const renderSelection1Visualization = React.useMemo(() => {
+    if (!selectedMolecule || !selection1VizDataMemo) return null;
+    return (
+      <InteractionVisualization
+        data={selection1VizDataMemo}
+        ligandName={selectedMolecule.type === 'ligand_receptor_pair' ? selectedMolecule.ligandId || '' : selectedMolecule.id}
+        currentScope={selection1Scope}
+        isLoading={isLoadingSelection1Viz}
+        cancelFetch={cancelSelection1VizFetch}
+        layerBoundaries={undefined}
+      />
+    );
+  }, [selection1VizDataMemo, selectedMolecule, selection1Scope, isLoadingSelection1Viz, cancelSelection1VizFetch]);
+
+  const renderSelection2Visualization = React.useMemo(() => {
+    if (!selectedMolecule || !selection2VizDataMemo) return null;
+    return (
+      <InteractionVisualization
+        data={selection2VizDataMemo}
+        ligandName={selectedMolecule.type === 'ligand_receptor_pair' ? selectedMolecule.ligandId || '' : selectedMolecule.id}
+        currentScope={selection2Scope}
+        isLoading={isLoadingSelection2Viz}
+        cancelFetch={cancelSelection2VizFetch}
+        layerBoundaries={undefined}
+      />
+    );
+  }, [selection2VizDataMemo, selectedMolecule, selection2Scope, isLoadingSelection2Viz, cancelSelection2VizFetch]);
+
+  const renderSelection1Loading = React.useMemo(() => {
+    if (!isLoadingSelection1Viz) return null;
+    return (<Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box>);
+  }, [isLoadingSelection1Viz]);
+
+  const renderSelection2Loading = React.useMemo(() => {
+    if (!isLoadingSelection2Viz) return null;
+    return (<Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box>);
+  }, [isLoadingSelection2Viz]);
+  
+  const toggleSelection1Fullscreen = useCallback(() => setIsSelection1Fullscreen(!isSelection1Fullscreen), [isSelection1Fullscreen]);
+  const toggleSelection2Fullscreen = useCallback(() => setIsSelection2Fullscreen(!isSelection2Fullscreen), [isSelection2Fullscreen]);
+
+  // Helper function to format selection definition for display (REMAINS HERE)
+  const formatSelectionDefinition = useCallback((selectionType: string, definition: any): string => {
+    if (selectionType === 'whole_tissue' || (!definition || Object.keys(definition).length === 0)) return 'Whole Tissue';
+    if (selectionType === 'layer' && definition.layer_name) return `Layer: ${definition.layer_name}`;
+    if (selectionType === 'lasso' && definition.polygon_coords) return `Custom Selection (${definition.polygon_coords.length} points)`;
+    return selectionType;
+  }, []);
+
   React.useEffect(() => {
-    if (state?.selection1 && !selection1) { // Only set initial selection1 once
-      setSelection1(state.selection1);
-    }
-    // Logic to handle data coming back for selection2 from DataInputPage
+    if (state?.selection1 && !selection1) setSelection1(state.selection1);
     if (state?.newSelectionFor === 'selection2' && state?.selectionData) {
       setSelection2(state.selectionData);
-      setSelection2ProjectOrigin(null); // Reset origin choice, selection 2 is now defined
-      // Optionally clear the state from navigation to prevent re-processing on refresh if not desired
-      // navigate(location.pathname, { replace: true, state: { ...state, newSelectionFor: undefined, selectionData: undefined } });
+      setSelection2ProjectOrigin(null);
     }
   }, [state, selection1, navigate, location.pathname]);
 
-  // --- End of Effect ---
-
-  // --- Effect to fetch job details for selection1's project if 'same project' is chosen for selection2 ---
-  // We use selection1.source_job_id to fetch the job details for the current project context
   const { jobStatus: currentProjectJobStatus, isLoading: isLoadingCurrentProjectJobStatus, error: currentProjectJobStatusError } = useJobStatus(selection1?.source_job_id && selection2ProjectOrigin === 'same' ? selection1.source_job_id : null);
 
   React.useEffect(() => {
     if (selection2ProjectOrigin === 'same' && currentProjectJobStatus) {
       setJobStatusForSelection1Project(currentProjectJobStatus);
       const outputs = currentProjectJobStatus?.results?.outputs;
-      if (outputs) {
-        setAvailableLayersForSelection2(Object.keys(outputs).filter(k => k !== 'whole_tissue' && k !== 'layer_boundaries'));
-      } else {
-        setAvailableLayersForSelection2([]);
-      }
+      setAvailableLayersForSelection2(outputs ? Object.keys(outputs).filter(k => k !== 'whole_tissue' && k !== 'layer_boundaries') : []);
     } else {
-      // Reset if not in 'same project' mode or if selection1 is not yet defined
       setJobStatusForSelection1Project(null);
       setAvailableLayersForSelection2([]);
       setSelectedLayerForSelection2(null);
     }
   }, [selection2ProjectOrigin, currentProjectJobStatus]);
 
-  // --- Effect to ensure a layer is selected for Selection 2 when in 'layers' scope and available layers change ---
   React.useEffect(() => {
     if (selection2ProjectOrigin === 'same' && selectedScopeForSelection2 === 'layers') {
       if (!selectedLayerForSelection2 || !availableLayersForSelection2.includes(selectedLayerForSelection2)) {
         setSelectedLayerForSelection2(availableLayersForSelection2.length > 0 ? availableLayersForSelection2[0] : null);
       }
     } else {
-      if (selectedLayerForSelection2 !== null) {
-        setSelectedLayerForSelection2(null); // Clear if not in 'layers' scope for sel2
-      }
+      if (selectedLayerForSelection2 !== null) setSelectedLayerForSelection2(null);
     }
   }, [selectedScopeForSelection2, availableLayersForSelection2, selectedLayerForSelection2, selection2ProjectOrigin]);
-  // --- End of Effects ---
 
   const handleBackToResults = () => {
-    if (selection1?.source_job_id) {
-      navigate(`/analysis/${selection1.source_job_id}`);
-    } else {
-      navigate('/'); // Fallback to data input or another sensible page
-    }
+    if (selection1?.source_job_id) navigate(`/analysis/${selection1.source_job_id}`);
+    else navigate('/');
   };
 
   const handleChooseSelection2Origin = (origin: 'same' | 'different') => {
     setSelection2ProjectOrigin(origin);
-    if (origin === 'different') {
-      // Navigate to DataInputPage to select/load a different project for selection 2
-      // Pass current selection1 so DataInputPage knows where to return and potentially other context.
-      // const returnState = {
-      //   returnTo: '/comparison',
-      //   selectionPurpose: 'selection2',
-      //   currentSelection1: selection1 // Pass selection1 along
-      // };
-      // navigate('/data-input', { state: returnState });
-      // For now, mark as coming soon
-      console.log("Select Different Project for Selection 2 - Marked as Coming Soon");
-    }
+    if (origin === 'different') console.log("Select Different Project for Selection 2 - Marked as Coming Soon");
   };
 
-  // --- Callback Handlers for Selection 2 Scope/Layer changes ---
   const handleScopeChangeForSelection2 = (scope: ScopeType) => {
     setSelectedScopeForSelection2(scope);
-    // Potentially clear layer/lasso for selection 2 if scope changes
-    if (scope !== 'layers') {
-      setSelectedLayerForSelection2(null);
-    }
-    if (scope !== 'custom') {
-      setLassoCoordsForSelection2(null);
-    }
+    if (scope !== 'layers') setSelectedLayerForSelection2(null);
+    if (scope !== 'custom') setLassoCoordsForSelection2(null);
   };
 
   const handleLayerChangeForSelection2 = (newLayers: string[]) => {
-    // Assuming LayerSelector might return multiple, but we only use one for now
     setSelectedLayerForSelection2(newLayers.length > 0 ? newLayers[0] : null);
   };
 
@@ -404,1071 +279,265 @@ const ComparisonToolPage: React.FC = () => {
   }, []);
 
   const handleConfirmSelection2SameProject = () => {
-    if (!selection1) return; // Should not happen if this UI is visible
-
+    if (!selection1) return;
     let definitionForSel2: SelectionData['definition'] = {};
     if (selectedScopeForSelection2 === 'layers') {
-      if (!selectedLayerForSelection2) {
-        alert("Please select a layer for Selection 2.");
-        return;
-      }
+      if (!selectedLayerForSelection2) { alert("Please select a layer for Selection 2."); return; }
       definitionForSel2 = { layer_name: selectedLayerForSelection2 };
     } else if (selectedScopeForSelection2 === 'custom') {
-      if (!lassoCoordsForSelection2 || lassoCoordsForSelection2.length === 0) {
-        alert("Please define a lasso selection for Selection 2.");
-        // For now, we'll allow proceeding without lasso for placeholder UI
-        // return;
-        console.warn("Proceeding with empty custom selection for Selection 2 (dev placeholder)")
-      }
+      if (!lassoCoordsForSelection2 || lassoCoordsForSelection2.length === 0) console.warn("Proceeding with empty custom selection for Selection 2 (dev placeholder)")
       definitionForSel2 = { polygon_coords: lassoCoordsForSelection2 || [] };
     }
-    // For 'whole_tissue', definition remains {}
-
     const sel2Data: SelectionData = {
-      source_job_id: selection1.source_job_id, // Same project
-      files: selection1.files,             // Same files
-      type: selectedScopeForSelection2 === 'layers' 
-            ? 'layer' 
-            : selectedScopeForSelection2 === 'custom' 
-            ? 'lasso' 
-            : 'whole_tissue',
+      source_job_id: selection1.source_job_id,
+      files: selection1.files,
+      type: selectedScopeForSelection2 === 'layers' ? 'layer' : selectedScopeForSelection2 === 'custom' ? 'lasso' : 'whole_tissue',
       definition: definitionForSel2,
-      mappings: selection1.mappings // Same mappings
+      mappings: selection1.mappings
     };
     setSelection2(sel2Data);
-    // After confirming, we might want to hide the selection2ProjectOrigin choice section
-    // or change the UI flow. For now, setting selection2 will make its display box appear.
   };
-  // --- End of Callbacks ---
 
-  // --- ADDED: Handler to call backend comparison API ---
   const handleRunComparison = async () => {
-    if (!selection1 || !selection2) {
-      alert("Both Selection 1 and Selection 2 must be defined before running comparison.");
-      return;
-    }
-
-    // Reset previous job tracking and errors
+    if (!selection1 || !selection2) { alert("Both selections must be defined."); return; }
     setComparisonJobId(null);
     setStartComparisonError(null);
-    setIsStartingComparison(true); // Indicate API call is in progress
-
-    const requestPayload: ComparisonRequestPayload = { 
-      selection1: selection1,
-      selection2: selection2,
-      fdr_threshold: fdrThreshold
-    };
-
+    setComparisonError(null); // Clear previous hook error too
+    setIsStartingComparison(true);
+    const requestPayload: ComparisonRequestPayload = { selection1, selection2, fdr_threshold: fdrThreshold };
     try {
       const response = await fetch('/api/analysis/compare', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestPayload),
       });
-
       const responseData: ComparisonJobResponseFE = await response.json(); 
-
       if (!response.ok) {
-        // MODIFIED: Log the full responseData specifically for 422 errors before throwing
-        if (response.status === 422) {
-          console.error("FastAPI Validation Error Details:", responseData);
-        }
-        const errorMsg = responseData.message || `Failed to start comparison job (status ${response.status}).`;
-        throw new Error(errorMsg);
+        if (response.status === 422) console.error("FastAPI Validation Error Details:", responseData);
+        throw new Error(responseData.message || `Failed to start job (status ${response.status})`);
       }
-
-      // FIX: Provide fallback to null if job_id is undefined
       setComparisonJobId(responseData.job_id ?? null);
-
     } catch (error) {
       console.error("Error starting comparison job:", error);
-      setStartComparisonError(error instanceof Error ? error.message : String(error));
-      setComparisonJobId(null); // Ensure no tracking happens if start fails
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      setStartComparisonError(errorMsg); // Use for immediate feedback on submission
+      setComparisonError(errorMsg); // Also set general comparison error
+      setComparisonJobId(null);
     } finally {
-      setIsStartingComparison(false); // API call finished (success or fail)
+      setIsStartingComparison(false);
     }
   };
-  // --- End of API Handler ---
 
-  // REMOVING temporary guard, RESTORING original if block but with SIMPLIFIED JSX
-  /* The temporary guard was:
-  if (!selection1) {
-    return <Typography>Loading or missing selection1 data...</Typography>;
-  }
-  */
+  const handleCloseVisualization = () => setSelectedMolecule(null);
 
-  // Original if block condition, but with simplified JSX content for its return:
-  if (!selection1 || !selection1.files || !selection1.mappings) {
-    return (
-      <Paper>
-        <Typography>Loading or data missing...</Typography>
-      </Paper>
+  // All hooks are now declared above this point.
+  // Now, we can have the early return.
+  // if (!selection1 || !selection1.files || !selection1.mappings) {
+  //   return (<Paper><Typography>Loading or data missing...</Typography></Paper>);
+  // }
+
+  const handleRowClick = (item: DifferentialExpressionResultFE) => {
+    console.log("ComparisonToolPage - Row clicked:", item);
+    setSelectedMolecule(item.type === 'ligand_receptor_pair' ? 
+      { id: `${item.ligand_id}-${item.receptor_id}`, type: 'ligand_receptor_pair', ligandId: item.ligand_id, receptorId: item.receptor_id } :
+      { id: item.molecule_id, type: item.type }
     );
-  }
-  // --- End of restored and simplified block ---
-
+  };
+  
+  useEffect(() => {
+    console.log("selectedMolecule changed:", selectedMolecule);
+  }, [selectedMolecule]);
+  
   return (
     <Paper elevation={2} className={styles.mainContainer}>
-      {/* RESTORING Page Title Typography */}
-      <Typography variant="h4" gutterBottom className={styles.pageTitle}>
-        Comparison Configuration
-      </Typography>
-
-      {/* Display Selection 1 - RESTORING ORIGINAL CONTENT */}
-      <Box className={styles.selectionBox} sx={{ mb: 4 }}>
-        <Typography variant="h6" gutterBottom>Selection 1 (From Job: {selection1.source_job_id || 'N/A'})</Typography>
-        <Typography><strong>File ID (Spatial):</strong> {selection1.files?.spatialFileId || 'N/A'}</Typography>
-        {/* Optionally display other file IDs if needed */}
-        {/* <Typography><strong>File ID (Interactions):</strong> {selection1.files?.interactionsFileId || 'N/A'}</Typography> */}
-        {/* <Typography><strong>File ID (Modules):</strong> {selection1.files?.modulesFileId || 'N/A'}</Typography> */}
-        <Typography><strong>Type:</strong> {selection1.type}</Typography>
-        <Typography><strong>Definition:</strong></Typography>
-        <pre className={styles.preformattedText}>{JSON.stringify(selection1.definition, null, 2)}</pre>
-        <Typography><strong>All Column Mappings:</strong></Typography>
-        <pre className={styles.preformattedText}>{JSON.stringify(selection1.mappings, null, 2)}</pre>
-      </Box>
-      {/* --- End of Selection 1 restoration --- */}
-
-      {/* Choose Origin for Selection 2 - RESTORING ORIGINAL CONTENT */}
-      {!selection2 && !selection2ProjectOrigin && (
-        <Box className={styles.selectionOriginBox} sx={{ mb: 4 }}>
-          <Typography variant="h6" gutterBottom>Define Selection 2</Typography>
-          <Button 
-            variant="contained" 
-            onClick={() => handleChooseSelection2Origin('same')} 
-            sx={{ mr: 2 }}
-            className={styles.actionButton}
-          >
-            Use Same Project for Selection 2
-          </Button>
-          <Button 
-            variant="contained" 
-            onClick={() => handleChooseSelection2Origin('different')}
-            className={styles.actionButton}
-          >
-            Select Different Project for Selection 2
-          </Button>
-        </Box>
-      )}
-      {/* --- End of Block A restoration --- */}
-
-      {/* UI for "Different Project" if chosen - RESTORING ORIGINAL CONTENT */}
-      {selection2ProjectOrigin === 'different' && !selection2 && (
-        <Box className={styles.selectionBox} sx={{ mb: 4, p:3, textAlign: 'center' }}>
-           <Typography variant="h6" gutterBottom>Select Different Project</Typography>
-           <Typography sx={{ fontStyle: 'italic', color: 'gray' }}>
-            This feature (selecting a different project for the second comparison selection) is coming soon!
+      {/* Conditionally render content based on selection1 being ready */}
+      {selection1 && selection1.files && selection1.mappings ? (
+        <>
+          <Typography variant="h4" gutterBottom className={styles.pageTitle}>
+            Comparison Configuration
           </Typography>
-           <Button variant="outlined" onClick={() => setSelection2ProjectOrigin(null)} sx={{mt: 2}}>
-            Back to Selection 2 Choice
-          </Button>
-        </Box>
-      )}
-      {/* --- End of 'Different Project' UI restoration --- */}
 
-      {/* UI for defining Selection 2 if 'same' project is chosen - RESTORING ORIGINAL CONTENT */}
-      {selection2ProjectOrigin === 'same' && !selection2 && (
-        <Box className={styles.selectionBox} sx={{ mb: 4 }}>
-          <Typography variant="h6" gutterBottom>Define Selection 2 (From Project: {selection1.source_job_id})</Typography>
-          
-          {isLoadingCurrentProjectJobStatus && <CircularProgress size={24} sx={{mr: 1}}/>}
-          {currentProjectJobStatusError && <Typography color="error">Error loading project details: {currentProjectJobStatusError}</Typography>}
-          
-          {jobStatusForSelection1Project && (
-            <>
-              <ScopeSelector 
-                selectedScope={selectedScopeForSelection2} 
-                onScopeChange={handleScopeChangeForSelection2} 
-              />
+          {/* Display Selection 1 Box */}
+          <Box className={styles.selectionBox} sx={{ mb: 4 }}>
+            <Typography variant="h6" gutterBottom>Selection 1</Typography>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <Typography><strong>Source:</strong> {selection1.source_job_id || 'N/A'}</Typography>
+              <Typography><strong>Type:</strong> {formatSelectionDefinition(selection1.type, selection1.definition)}</Typography>
+            </Box>
+          </Box>
 
-              {selectedScopeForSelection2 === 'layers' && (
-                <Box sx={{mt: 2}} className={styles.layerSelectorContainer}>
-                  <LayerSelector 
-                    availableLayers={availableLayersForSelection2}
-                    selectedLayers={selectedLayerForSelection2 ? [selectedLayerForSelection2] : []}
-                    onLayersChange={handleLayerChangeForSelection2}
-                  />
-                  {availableLayersForSelection2.length === 0 && <Typography sx={{mt:1, fontSize: '0.9em'}}>No layers found in this project.</Typography>}
-                </Box>
-              )}
+          {!selection2 && !selection2ProjectOrigin && (
+            <Box className={styles.selectionOriginBox} sx={{ mb: 4 }}>
+              <Typography variant="h6" gutterBottom>Define Selection 2</Typography>
+              <Button variant="contained" onClick={() => handleChooseSelection2Origin('same')} sx={{ mr: 2 }} className={styles.actionButton}>
+                Use Same Project for Selection 2
+              </Button>
+              <Button variant="contained" onClick={() => handleChooseSelection2Origin('different')} className={styles.actionButton}>
+                Select Different Project for Selection 2
+              </Button>
+            </Box>
+          )}
 
-              {selectedScopeForSelection2 === 'custom' && (
-                <Box sx={{mt: 2}}>
-                  <Typography sx={{ fontStyle: 'italic', color: 'gray', mb:1 }}>
-                    Draw a lasso on the spatial overview below to define your custom selection for Selection 2.
-                  </Typography>
-                  {selection1?.source_job_id && (
-                    <Box className={styles.spatialVizContainerForSel2}>
-                        <SpatialOverviewVisualization 
-                            jobId={selection1.source_job_id} 
-                            onLassoSelect={handleLassoSelectForSelection2}
-                            onAnalyzeSelection={() => console.log("Analyze Selection clicked in Comparison (Sel2) - No-op for now")}
-                            showAnalyzeButton={false}
-                        />
+          {selection2ProjectOrigin === 'different' && !selection2 && (
+            <Box className={styles.selectionBox} sx={{ mb: 4, p:3, textAlign: 'center' }}>
+              <Typography variant="h6" gutterBottom>Select Different Project</Typography>
+              <Typography sx={{ fontStyle: 'italic', color: 'gray' }}>Feature coming soon!</Typography>
+              <Button variant="outlined" onClick={() => setSelection2ProjectOrigin(null)} sx={{mt: 2}}>
+                Back to Selection 2 Choice
+              </Button>
+            </Box>
+          )}
+
+          {selection2ProjectOrigin === 'same' && !selection2 && (
+            <Box className={styles.selectionBox} sx={{ mb: 4 }}>
+              <Typography variant="h6" gutterBottom>Define Selection 2 (From Project: {selection1.source_job_id})</Typography>
+              {isLoadingCurrentProjectJobStatus && <CircularProgress size={24} sx={{mr: 1}}/>}
+              {currentProjectJobStatusError && <Typography color="error">Error loading project details: {currentProjectJobStatusError}</Typography>}
+              {jobStatusForSelection1Project && (
+                <>
+                  <ScopeSelector selectedScope={selectedScopeForSelection2} onScopeChange={handleScopeChangeForSelection2} />
+                  {selectedScopeForSelection2 === 'layers' && (
+                    <Box sx={{mt: 2}} className={styles.layerSelectorContainer}>
+                      <LayerSelector availableLayers={availableLayersForSelection2} selectedLayers={selectedLayerForSelection2 ? [selectedLayerForSelection2] : []} onLayersChange={handleLayerChangeForSelection2} />
+                      {availableLayersForSelection2.length === 0 && <Typography sx={{mt:1, fontSize: '0.9em'}}>No layers found.</Typography>}
                     </Box>
                   )}
-                  {!selection1?.source_job_id && <Typography color="error">Source Job ID for spatial view is missing.</Typography>}
-                </Box>
-              )}
-
-              <Button variant="outlined" sx={{ mt: 2 }} onClick={handleConfirmSelection2SameProject}>
-                Confirm Selection 2 (Same Project)
-              </Button>
-            </>
-          )}
-        </Box>
-      )}
-      {/* --- End of 'Same Project' UI restoration --- */}
-
-      {/* Display Selection 2 if defined - RESTORING ORIGINAL CONTENT */}
-      {selection2 && (
-         <Box className={styles.selectionBox} sx={{ mb: 4, backgroundColor: '#e3f2fd' /* Light blue to differentiate */ }}>
-          <Typography variant="h6" gutterBottom>Selection 2 (From Job: {selection2.source_job_id || 'N/A'})</Typography>
-          <Typography><strong>File ID (Spatial):</strong> {selection2.files?.spatialFileId || 'N/A'}</Typography>
-          <Typography><strong>Type:</strong> {selection2.type}</Typography>
-          <Typography><strong>Definition:</strong></Typography>
-          <pre className={styles.preformattedText}>{JSON.stringify(selection2.definition, null, 2)}</pre>
-          <Typography><strong>All Column Mappings:</strong></Typography>
-          <pre className={styles.preformattedText}>{JSON.stringify(selection2.mappings, null, 2)}</pre>
-        </Box>
-      )}
-      {/* --- End of Selection 2 display restoration --- */}
-
-      {/* Analysis Configuration Trigger block */}
-      {selection1 && selection2 && (
-        <Box sx={{ mt: 4, pt: 2, borderTop: '1px solid #ccc' }} className={styles.analysisConfigSection}>
-          <Typography variant="h6" gutterBottom>Comparison Parameters</Typography>
-          <TextField 
-            label="Significance Threshold (FDR)"
-            type="number"
-            value={fdrThreshold}
-            onChange={(e) => {
-              const val = parseFloat(e.target.value);
-              if (!isNaN(val) && val >= 0 && val <= 1) {
-                setFdrThreshold(val);
-              } else if (e.target.value === '') {
-                 // Allow clearing? Keep last valid for now.
-              }
-            }}
-            inputProps={{
-              step: 0.01,
-              min: 0,    
-              max: 1     
-            }}
-            helperText="Adjust the False Discovery Rate threshold for significance (e.g., 0.05)."
-            sx={{ maxWidth: 300, mb: 3 }}
-            variant="outlined"
-            size="small"
-          />
-          <Button 
-            variant="contained" 
-            color="primary" 
-            size="large"
-            className={styles.actionButton}
-            onClick={handleRunComparison} 
-            disabled={isStartingComparison || isLoadingComparisonJobStatus || (comparisonJobDetails?.status === 'running' || comparisonJobDetails?.status === 'pending')}
-          >
-            {(isStartingComparison || isLoadingComparisonJobStatus || comparisonJobDetails?.status === 'running' || comparisonJobDetails?.status === 'pending') 
-             ? <CircularProgress size={24} color="inherit" /> 
-             : 'Run Comparison'} 
-          </Button>
-           {/* Display error from starting the job */}
-           {startComparisonError && (
-            <Alert severity="error" sx={{ mt: 2 }}>
-                Failed to start comparison: {startComparisonError}
-            </Alert>
-           )}
-        </Box>
-      )}
-
-      {/* Results Display Section - Now driven by useJobStatus */}
-      {/* Show this section only if a comparison job has been started */}
-      {comparisonJobId && (
-        <Box sx={{ mt: 4, pt: 2, borderTop: '1px solid #ccc' }} className={styles.resultsDisplaySection}>
-          <Typography variant="h6" gutterBottom>Comparison Results (Job: {comparisonJobId})</Typography>
-          
-          {/* Loading state from useJobStatus */}
-          {isLoadingComparisonJobStatus && (
-            <Box sx={{display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100px'}}>
-                <CircularProgress />
-                <Typography sx={{ml: 2}}>Loading comparison status...</Typography>
-            </Box>
-          )}
-
-          {/* Display job status message while pending/running */}
-          {!isLoadingComparisonJobStatus && (comparisonJobDetails?.status === 'pending' || comparisonJobDetails?.status === 'running') && (
-            <Box sx={{display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100px'}}>
-                <CircularProgress />
-                <Typography sx={{ml: 2}}>{comparisonJobDetails.message || `Job is ${comparisonJobDetails.status}...`} (Progress: {comparisonJobDetails?.progress !== null && comparisonJobDetails?.progress !== undefined ? `${(comparisonJobDetails.progress * 100).toFixed(0)}%` : 'N/A'})</Typography>
-            </Box>
-          )}
-
-          {/* Display error from useJobStatus (polling/websocket or final job failure) */}
-          {comparisonJobError && (
-            <Alert severity="error" sx={{mt: 2}}>
-               Error tracking comparison job: {comparisonJobError}
-            </Alert>
-          )}
-          
-          {/* Display final job failure message if status is failed */}
-          {!isLoadingComparisonJobStatus && comparisonJobDetails?.status === 'failed' && (
-            <Alert severity="error" sx={{mt: 2}}>
-               Comparison Failed: {comparisonJobDetails.message || 'Unknown error'}
-               {/* Optionally display backend errors stored in results.errors */}
-               {comparisonJobDetails.results?.errors && comparisonJobDetails.results.errors.length > 0 && (
-                 <ul style={{ marginTop: '8px', marginBottom: 0 }}>
-                   {comparisonJobDetails.results.errors.map((err: string, i: number) => <li key={i}>{err}</li>)}
-                 </ul>
-               )}
-            </Alert>
-          )}
-
-          {/* Display results table only when job succeeded */}
-          {!isLoadingComparisonJobStatus && comparisonJobDetails?.status === 'success' && (
-            <Box sx={{mt: 2}}>
-              {comparisonJobDetails.results?.results?.differential_expression && comparisonJobDetails.results.results.differential_expression.length > 0 ? (
-                <>
-                  {/* Add an explanation guide above the results */}
-                  <Accordion sx={{ mb: 3 }}>
-                    <AccordionSummary
-                      expandIcon={<ExpandMoreIcon />}
-                      aria-controls="explanation-content"
-                      id="explanation-header"
-                    >
-                      <Typography variant="h6">What do these results mean? (Click to expand)</Typography>
-                    </AccordionSummary>
-                    <AccordionDetails>
-                      <Typography variant="subtitle1" gutterBottom>Understanding Molecular Comparison Results:</Typography>
-                      <Box sx={{ ml: 2, mb: 2 }}>
-                        <Typography variant="body1" paragraph>
-                          <strong>Normalized Mean Values</strong> - Average expression level for each molecule in the selected regions, 
-                          normalized to account for differences in total counts. Very small values may appear as 0.000 but have tooltips showing the actual value.
-                        </Typography>
-                        <Typography variant="body1" paragraph>
-                          <strong>Log₂FC (Log2 Fold Change)</strong> - Shows how much expression differs between selections:
-                          <Box component="ul" sx={{ mt: 1, mb: 1 }}>
-                            <li>Positive values (🔼) indicate <strong>higher expression in Selection 2</strong></li>
-                            <li>Negative values (🔽) indicate <strong>higher expression in Selection 1</strong></li>
-                            <li>The value is shown alongside the actual fold change (e.g., "2×" means "twice as much")</li>
-                          </Box>
-                        </Typography>
-                        <Typography variant="body1" paragraph>
-                          <strong>q-value</strong> - The statistical significance (false discovery rate corrected p-value):
-                          <Box component="ul" sx={{ mt: 1, mb: 1 }}>
-                            <li>* (q &lt; 0.05) - Significant</li>
-                            <li>** (q &lt; 0.01) - Highly significant</li>
-                            <li>*** (q &lt; 0.001) - Extremely significant</li>
-                          </Box>
-                        </Typography>
-                        <Typography variant="body1" paragraph>
-                          <strong>Types</strong> - Molecules are classified as:
-                          <Box component="ul" sx={{ mt: 1, mb: 1 }}>
-                            <li><strong>Ligands</strong> - Signaling molecules that are released by cells</li>
-                            <li><strong>Receptors</strong> - Cell surface proteins that bind to ligands</li>
-                            <li><strong>L-R Pairs</strong> - Ligand-receptor interactions that may indicate cell-cell communication</li>
-                          </Box>
-                        </Typography>
-                        <Typography variant="body1">
-                          <strong>Biological Interpretation:</strong> Differential expression may suggest region-specific functions, 
-                          cell type differences, or responses to environmental cues.
-                        </Typography>
-                      </Box>
-                    </AccordionDetails>
-                  </Accordion>
-
-                  {/* Top changed interactions */}
-                  <Box sx={{ mb: 4 }}>
-                    <Typography variant="h6" gutterBottom sx={{ 
-                      borderBottom: '2px solid #3f51b5', 
-                      pb: 1, 
-                      display: 'flex', 
-                      alignItems: 'center' 
-                    }}>
-                      <span style={{ marginRight: '8px' }}>🔍</span> Top Changed Interactions
-                    </Typography>
-                    
-                    {/* Selection A vs Selection B info */}
-                    <Box sx={{ 
-                      display: 'flex', 
-                      justifyContent: 'space-between', 
-                      mb: 2, 
-                      p: 2, 
-                      backgroundColor: '#f5f5f5', 
-                      borderRadius: 1 
-                    }}>
-                      <Box sx={{ 
-                        flex: 1, 
-                        p: 1, 
-                        backgroundColor: 'rgba(0, 0, 255, 0.1)', 
-                        borderRadius: 1, 
-                        mr: 1 
-                      }}>
-                        <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
-                          Selection 1: {selection1?.type === 'layer' ? selection1.definition.layer_name : selection1?.type}
-                        </Typography>
-                        <Typography variant="body2">
-                          {selection1?.source_job_id}
-                        </Typography>
-                      </Box>
-                      <Box sx={{ 
-                        flex: 1, 
-                        p: 1, 
-                        backgroundColor: 'rgba(255, 0, 0, 0.1)', 
-                        borderRadius: 1, 
-                        ml: 1 
-                      }}>
-                        <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
-                          Selection 2: {selection2?.type === 'layer' ? selection2.definition.layer_name : selection2?.type}
-                        </Typography>
-                        <Typography variant="body2">
-                          {selection2?.source_job_id}
-                        </Typography>
-                      </Box>
+                  {selectedScopeForSelection2 === 'custom' && (
+                    <Box sx={{mt: 2}}>
+                      <Typography sx={{ fontStyle: 'italic', color: 'gray', mb:1 }}>Draw on spatial overview for Selection 2.</Typography>
+                      {selection1?.source_job_id && (
+                        <Box className={styles.spatialVizContainerForSel2}>
+                            <SpatialOverviewVisualization jobId={selection1.source_job_id} onLassoSelect={handleLassoSelectForSelection2} showAnalyzeButton={false} />
+                        </Box>
+                      )}
+                      {!selection1?.source_job_id && <Typography color="error">Source Job ID missing.</Typography>}
                     </Box>
-
-                    {/* Enhanced results display */}
-                    <Box>
-                      {/* Molecules more active in Selection 2 (red) */}
-                      <Typography variant="subtitle1" sx={{ 
-                        mt: 2, 
-                        mb: 1, 
-                        fontWeight: 'bold', 
-                        color: '#d32f2f',
-                        display: 'flex',
-                        alignItems: 'center'
-                      }}>
-                        <span style={{ marginRight: '8px' }}>🔺</span> More Active in Selection 2
-                      </Typography>
-                      <Box sx={{ 
-                        mb: 3, 
-                        maxHeight: '250px', 
-                        overflowY: 'auto', 
-                        border: '1px solid #e0e0e0', 
-                        borderRadius: 1 
-                      }}>
-                        {comparisonJobDetails.results.results.differential_expression
-                          .filter((item: DifferentialExpressionResultFE) => {
-                            const absLog2FC = Math.abs(item.log2_fold_change || 0);
-                            const maxMean = Math.max(item.mean_selection1 || 0, item.mean_selection2 || 0);
-                            const typeFilter = 
-                              (item.type === 'single_ligand' && showLigands) || 
-                              (item.type === 'single_receptor' && showReceptors) || 
-                              (item.type === 'ligand_receptor_pair' && showLRPairs);
-                              
-                            return absLog2FC >= filterMinLog2FC &&
-                                   (item.q_value || 1) <= filterMaxQValue &&
-                                   maxMean >= filterMinMeanValue &&
-                                   typeFilter;
-                          }).sort((a: DifferentialExpressionResultFE, b: DifferentialExpressionResultFE) => (b.log2_fold_change || 0) - (a.log2_fold_change || 0))
-                          .slice(0, 10)
-                          .map((item: DifferentialExpressionResultFE, index: number) => {
-                            const { displayName, roleName } = getDisplayNameAndRole(item);
-                            const { display: foldChange, isPositive } = safeFormatLog2FC(item.log2_fold_change);
-                            const stars = getSignificanceStars(item.q_value);
-                            
-                            return (
-                              <Box key={`${item.molecule_id}-${index}`} sx={{ 
-                                p: 1.5, 
-                                borderBottom: index < 9 ? '1px solid #e0e0e0' : 'none',
-                                backgroundColor: index % 2 === 0 ? 'white' : '#fafafa',
-                                '&:hover': {
-                                  backgroundColor: '#f5f5f5'
-                                }
-                              }}>
-                                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                                    <Typography sx={{ mr: 1, color: '#666' }}>{isPositive ? '🔼' : '🔽'}</Typography>
-                                    <Typography sx={{ fontWeight: 'bold' }}>
-                                      {displayName} {stars}
-                                    </Typography>
-                                    <Typography variant="caption" sx={{ ml: 1, color: '#666' }}>
-                                      ({roleName})
-                                    </Typography>
-                                  </Box>
-                                  <Typography variant="body2" sx={{ 
-                                    color: isPositive ? '#d32f2f' : '#1976d2', 
-                                    fontWeight: 'bold',
-                                    backgroundColor: 'rgba(211, 47, 47, 0.1)',
-                                    px: 1,
-                                    py: 0.5,
-                                    borderRadius: 1
-                                  }}>
-                                    {foldChange}
-                                  </Typography>
-                                </Box>
-                                <Box sx={{ display: 'flex', mt: 1, justifyContent: 'space-between' }}>
-                                  <Typography variant="caption" sx={{ color: '#666' }}>
-                                    Mean expr: {item.mean_selection1?.toFixed(3)} → {item.mean_selection2?.toFixed(3)}
-                                  </Typography>
-                                  <Typography variant="caption" sx={{ color: '#666' }}>
-                                    q-value: {item.q_value?.toExponential(1)}
-                                  </Typography>
-                                </Box>
-                              </Box>
-                            );
-                          })}
-                          {comparisonJobDetails.results.results.differential_expression
-                            .filter((item: DifferentialExpressionResultFE) => {
-                              const absLog2FC = Math.abs(item.log2_fold_change || 0);
-                              const maxMean = Math.max(item.mean_selection1 || 0, item.mean_selection2 || 0);
-                              const typeFilter = 
-                                (item.type === 'single_ligand' && showLigands) || 
-                                (item.type === 'single_receptor' && showReceptors) || 
-                                (item.type === 'ligand_receptor_pair' && showLRPairs);
-                                
-                              return absLog2FC >= filterMinLog2FC &&
-                                     (item.q_value || 1) <= filterMaxQValue &&
-                                     maxMean >= filterMinMeanValue &&
-                                     typeFilter;
-                            }).length === 0 && (
-                            <Box sx={{ p: 2, textAlign: 'center', color: '#666' }}>
-                              <Typography>No significant upregulated molecules found in Selection 2</Typography>
-                            </Box>
-                          )}
-                      </Box>
-                      
-                      {/* Molecules more active in Selection 1 (blue) */}
-                      <Typography variant="subtitle1" sx={{ 
-                        mt: 3, 
-                        mb: 1, 
-                        fontWeight: 'bold', 
-                        color: '#1976d2',
-                        display: 'flex',
-                        alignItems: 'center'
-                      }}>
-                        <span style={{ marginRight: '8px' }}>🔻</span> More Active in Selection 1
-                      </Typography>
-                      <Box sx={{ 
-                        mb: 3, 
-                        maxHeight: '250px', 
-                        overflowY: 'auto', 
-                        border: '1px solid #e0e0e0', 
-                        borderRadius: 1 
-                      }}>
-                        {comparisonJobDetails.results.results.differential_expression
-                          .filter((item: DifferentialExpressionResultFE) => {
-                            const absLog2FC = Math.abs(item.log2_fold_change || 0);
-                            const maxMean = Math.max(item.mean_selection1 || 0, item.mean_selection2 || 0);
-                            const typeFilter = 
-                              (item.type === 'single_ligand' && showLigands) || 
-                              (item.type === 'single_receptor' && showReceptors) || 
-                              (item.type === 'ligand_receptor_pair' && showLRPairs);
-                              
-                            return absLog2FC >= filterMinLog2FC &&
-                                   (item.q_value || 1) <= filterMaxQValue &&
-                                   maxMean >= filterMinMeanValue &&
-                                   typeFilter;
-                          }).sort((a: DifferentialExpressionResultFE, b: DifferentialExpressionResultFE) => (a.log2_fold_change || 0) - (b.log2_fold_change || 0))
-                          .slice(0, 10)
-                          .map((item: DifferentialExpressionResultFE, index: number) => {
-                            const { displayName, roleName } = getDisplayNameAndRole(item);
-                            const { display: foldChange, isPositive } = safeFormatLog2FC(item.log2_fold_change);
-                            const stars = getSignificanceStars(item.q_value);
-                            
-                            return (
-                              <Box key={`${item.molecule_id}-${index}`} sx={{ 
-                                p: 1.5, 
-                                borderBottom: index < 9 ? '1px solid #e0e0e0' : 'none',
-                                backgroundColor: index % 2 === 0 ? 'white' : '#fafafa',
-                                '&:hover': {
-                                  backgroundColor: '#f5f5f5'
-                                }
-                              }}>
-                                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                                    <Typography sx={{ mr: 1, color: '#666' }}>{isPositive ? '🔼' : '🔽'}</Typography>
-                                    <Typography sx={{ fontWeight: 'bold' }}>
-                                      {displayName} {stars}
-                                    </Typography>
-                                    <Typography variant="caption" sx={{ ml: 1, color: '#666' }}>
-                                      ({roleName})
-                                    </Typography>
-                                  </Box>
-                                  <Typography variant="body2" sx={{ 
-                                    color: isPositive ? '#d32f2f' : '#1976d2', 
-                                    fontWeight: 'bold',
-                                    backgroundColor: 'rgba(211, 47, 47, 0.1)',
-                                    px: 1,
-                                    py: 0.5,
-                                    borderRadius: 1
-                                  }}>
-                                    {foldChange}
-                                  </Typography>
-                                </Box>
-                                <Box sx={{ display: 'flex', mt: 1, justifyContent: 'space-between' }}>
-                                  <Typography variant="caption" sx={{ color: '#666' }}>
-                                    Mean expr: {item.mean_selection1?.toFixed(3)} → {item.mean_selection2?.toFixed(3)}
-                                  </Typography>
-                                  <Typography variant="caption" sx={{ color: '#666' }}>
-                                    q-value: {item.q_value?.toExponential(1)}
-                                  </Typography>
-                                </Box>
-                              </Box>
-                            );
-                          })}
-                          {comparisonJobDetails.results.results.differential_expression
-                            .filter((item: DifferentialExpressionResultFE) => {
-                              const absLog2FC = Math.abs(item.log2_fold_change || 0);
-                              const maxMean = Math.max(item.mean_selection1 || 0, item.mean_selection2 || 0);
-                              const typeFilter = 
-                                (item.type === 'single_ligand' && showLigands) || 
-                                (item.type === 'single_receptor' && showReceptors) || 
-                                (item.type === 'ligand_receptor_pair' && showLRPairs);
-                                
-                              return absLog2FC >= filterMinLog2FC &&
-                                     (item.q_value || 1) <= filterMaxQValue &&
-                                     maxMean >= filterMinMeanValue &&
-                                     typeFilter;
-                            }).length === 0 && (
-                            <Box sx={{ p: 2, textAlign: 'center', color: '#666' }}>
-                              <Typography>No significant upregulated molecules found in Selection 1</Typography>
-                            </Box>
-                          )}
-                      </Box>
-                    </Box>
-                  </Box>
-                  
-                  {/* What It Might Mean Section */}
-                  <Box sx={{ mb: 4 }}>
-                    <Typography variant="h6" gutterBottom sx={{ 
-                      borderBottom: '2px solid #3f51b5', 
-                      pb: 1, 
-                      display: 'flex', 
-                      alignItems: 'center' 
-                    }}>
-                      <span style={{ marginRight: '8px' }}>🧠</span> What It Might Mean
-                    </Typography>
-                    
-                    <Box sx={{ 
-                      p: 2, 
-                      backgroundColor: '#f5f5f5', 
-                      borderRadius: 1 
-                    }}>
-                      {/* Simple auto-annotation based on molecule types */}
-                      {(() => {
-                        // Count L-R pairs, ligands, receptors
-                        const lrPairs = comparisonJobDetails.results.results.differential_expression
-                          .filter((item: DifferentialExpressionResultFE) => 
-                            item.type === 'ligand_receptor_pair' && 
-                            (item.q_value || 1) <= filterMaxQValue &&
-                            Math.abs(item.log2_fold_change || 0) >= filterMinLog2FC
-                          );
-                          
-                        const ligandsUp = comparisonJobDetails.results.results.differential_expression
-                          .filter((item: DifferentialExpressionResultFE) => 
-                            item.type === 'single_ligand' && 
-                            (item.log2_fold_change || 0) > 0 &&
-                            (item.q_value || 1) <= filterMaxQValue &&
-                            Math.abs(item.log2_fold_change || 0) >= filterMinLog2FC
-                          );
-                          
-                        const ligandsDown = comparisonJobDetails.results.results.differential_expression
-                          .filter((item: DifferentialExpressionResultFE) => 
-                            item.type === 'single_ligand' && 
-                            (item.log2_fold_change || 0) < 0 &&
-                            (item.q_value || 1) <= filterMaxQValue &&
-                            Math.abs(item.log2_fold_change || 0) >= filterMinLog2FC
-                          );
-                          
-                        const receptorsUp = comparisonJobDetails.results.results.differential_expression
-                          .filter((item: DifferentialExpressionResultFE) => 
-                            item.type === 'single_receptor' && 
-                            (item.log2_fold_change || 0) > 0 &&
-                            (item.q_value || 1) <= filterMaxQValue &&
-                            Math.abs(item.log2_fold_change || 0) >= filterMinLog2FC
-                          );
-                          
-                        const receptorsDown = comparisonJobDetails.results.results.differential_expression
-                          .filter((item: DifferentialExpressionResultFE) => 
-                            item.type === 'single_receptor' && 
-                            (item.log2_fold_change || 0) < 0 &&
-                            (item.q_value || 1) <= filterMaxQValue &&
-                            Math.abs(item.log2_fold_change || 0) >= filterMinLog2FC
-                          );
-                          
-                        // Find most extreme LR pairs
-                        const topPair = [...lrPairs].sort((a: DifferentialExpressionResultFE, b: DifferentialExpressionResultFE) => 
-                          Math.abs(b.log2_fold_change || 0) - Math.abs(a.log2_fold_change || 0)
-                        )[0];
-                        
-                        // Selection names for summary
-                        const sel1Name = selection1?.type === 'layer' ? 
-                          selection1.definition.layer_name : 
-                          selection1?.type === 'lasso' ? 'custom region 1' : 'whole tissue';
-                          
-                        const sel2Name = selection2?.type === 'layer' ? 
-                          selection2.definition.layer_name : 
-                          selection2?.type === 'lasso' ? 'custom region 2' : 'whole tissue';
-                        
-                        return (
-                          <>
-                            <Typography variant="body1" sx={{ mb: 2 }}>
-                              Your comparison between <strong>{sel1Name}</strong> and <strong>{sel2Name}</strong> reveals:
-                            </Typography>
-                            
-                            <Box sx={{ mb: 2 }}>
-                              <Typography variant="body1" sx={{ mb: 1, fontWeight: 'medium' }}>
-                                Cell Communication Patterns:
-                              </Typography>
-                              <ul style={{ marginTop: 0, paddingLeft: '1.5rem' }}>
-                                {lrPairs.length > 0 ? (
-                                  <li>
-                                    <Typography variant="body2">
-                                      {lrPairs.length} significantly different ligand-receptor interactions
-                                      {topPair && topPair.log2_fold_change && topPair.log2_fold_change > 0 ? (
-                                        <>, with the strongest being <strong>{topPair.ligand_id} → {topPair.receptor_id}</strong> (more active in {sel2Name})</>
-                                      ) : topPair ? (
-                                        <>, with the strongest being <strong>{topPair.ligand_id} → {topPair.receptor_id}</strong> (more active in {sel1Name})</>
-                                      ) : null}
-                                    </Typography>
-                                  </li>
-                                ) : (
-                                  <li>
-                                    <Typography variant="body2">
-                                      No significantly different ligand-receptor interactions detected at current thresholds
-                                    </Typography>
-                                  </li>
-                                )}
-                                
-                                {ligandsUp.length > 0 && (
-                                  <li>
-                                    <Typography variant="body2">
-                                      {ligandsUp.length} signaling molecules (ligands) are more active in {sel2Name}
-                                      {ligandsUp.length > 0 && (
-                                        <>, including <strong>{ligandsUp.slice(0, 3).map((item: DifferentialExpressionResultFE) => item.molecule_id).join(', ')}</strong>
-                                        {ligandsUp.length > 3 ? ' and others' : ''}</>
-                                      )}
-                                    </Typography>
-                                  </li>
-                                )}
-                                
-                                {ligandsDown.length > 0 && (
-                                  <li>
-                                    <Typography variant="body2">
-                                      {ligandsDown.length} signaling molecules (ligands) are more active in {sel1Name}
-                                      {ligandsDown.length > 0 && (
-                                        <>, including <strong>{ligandsDown.slice(0, 3).map((item: DifferentialExpressionResultFE) => item.molecule_id).join(', ')}</strong>
-                                        {ligandsDown.length > 3 ? ' and others' : ''}</>
-                                      )}
-                                    </Typography>
-                                  </li>
-                                )}
-                                
-                                {receptorsUp.length > 0 && (
-                                  <li>
-                                    <Typography variant="body2">
-                                      {receptorsUp.length} receptor molecules show higher expression in {sel2Name}
-                                    </Typography>
-                                  </li>
-                                )}
-                                
-                                {receptorsDown.length > 0 && (
-                                  <li>
-                                    <Typography variant="body2">
-                                      {receptorsDown.length} receptor molecules show higher expression in {sel1Name}
-                                    </Typography>
-                                  </li>
-                                )}
-                              </ul>
-                            </Box>
-                            
-                            <Typography variant="body2" color="text.secondary">
-                              Note: This is an automated interpretation based solely on expression data. 
-                              Biological validation is needed to confirm these findings.
-                            </Typography>
-                          </>
-                        );
-                      })()}
-                    </Box>
-                  </Box>
-                  
-                  {/* Original table for reference - can be toggled */}
-                  <Box sx={{ mb: 4 }}>
-                    <Typography variant="h6" gutterBottom sx={{
-                      borderBottom: '2px solid #3f51b5',
-                      pb: 1,
-                      display: 'flex',
-                      alignItems: 'center'
-                    }}>
-                      <span style={{ marginRight: '8px' }}>📊</span> Complete Results Table
-                    </Typography>
-                    
-                    <TableContainer component={Paper} sx={{ mt: 2, maxHeight: '600px' }}> 
-                      <Table stickyHeader className={styles.resultsTable} aria-label="comparison results table">
-                        <TableHead>
-                          <TableRow>
-                            <TableCell>
-                              <Tooltip title="Unique molecule identifier or ligand-receptor pair">
-                                <Box sx={{display: 'flex', alignItems: 'center'}}>
-                                  Molecule
-                                  <InfoIcon sx={{ml: 0.5, fontSize: '0.9rem', color: 'text.secondary'}} />
-                                </Box>
-                              </Tooltip>
-                            </TableCell>
-                            <TableCell>
-                              <Tooltip title="Relative expression level in the first selection (hover for exact values)">
-                                <Box sx={{display: 'flex', alignItems: 'center'}}>
-                                  Rel. Expression (Sel 1)
-                                  <InfoIcon sx={{ml: 0.5, fontSize: '0.9rem', color: 'text.secondary'}} />
-                                </Box>
-                              </Tooltip>
-                            </TableCell>
-                            <TableCell>
-                              <Tooltip title="Relative expression level in the second selection (hover for exact values)">
-                                <Box sx={{display: 'flex', alignItems: 'center'}}>
-                                  Rel. Expression (Sel 2)
-                                  <InfoIcon sx={{ml: 0.5, fontSize: '0.9rem', color: 'text.secondary'}} />
-                                </Box>
-                              </Tooltip>
-                            </TableCell>
-                            <TableCell>
-                              <Tooltip title="Log2 Fold Change between selections. Positive values indicate higher expression in Selection 2.">
-                                <Box sx={{display: 'flex', alignItems: 'center'}}>
-                                  Log₂FC
-                                  <InfoIcon sx={{ml: 0.5, fontSize: '0.9rem', color: 'text.secondary'}} />
-                                </Box>
-                              </Tooltip>
-                            </TableCell>
-                            <TableCell>
-                              <Tooltip title="False discovery rate expressed as a percentage (chance of false positive)">
-                                <Box sx={{display: 'flex', alignItems: 'center'}}>
-                                  FDR
-                                  <InfoIcon sx={{ml: 0.5, fontSize: '0.9rem', color: 'text.secondary'}} />
-                                </Box>
-                              </Tooltip>
-                            </TableCell>
-                            <TableCell>
-                              <Tooltip title="Molecule classification based on interactions database">
-                                <Box sx={{display: 'flex', alignItems: 'center'}}>
-                                  Type
-                                  <InfoIcon sx={{ml: 0.5, fontSize: '0.9rem', color: 'text.secondary'}} />
-                                </Box>
-                              </Tooltip>
-                            </TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {comparisonJobDetails.results.results.differential_expression
-                            .filter((item: DifferentialExpressionResultFE) => {
-                              const absLog2FC = Math.abs(item.log2_fold_change || 0);
-                              const maxMean = Math.max(item.mean_selection1 || 0, item.mean_selection2 || 0);
-                              const typeFilter = 
-                                (item.type === 'single_ligand' && showLigands) || 
-                                (item.type === 'single_receptor' && showReceptors) || 
-                                (item.type === 'ligand_receptor_pair' && showLRPairs);
-                                
-                              return absLog2FC >= filterMinLog2FC &&
-                                     (item.q_value || 1) <= filterMaxQValue &&
-                                     maxMean >= filterMinMeanValue &&
-                                     typeFilter;
-                            })
-                            .map((item: DifferentialExpressionResultFE, index: number) => {
-                              const { displayName, roleName } = getDisplayNameAndRole(item);
-                              const { display: foldChange, isPositive } = safeFormatLog2FC(item.log2_fold_change);
-                              const stars = getSignificanceStars(item.q_value);
-                              
-                              return (
-                                <TableRow key={`${item.molecule_id}-${index}`}>
-                                  <TableCell>{displayName}</TableCell>
-                                  <TableCell>
-                                    {(() => {
-                                      const normValue = normalizeExpressionValue(item.mean_selection1);
-                                      return (
-                                        <Tooltip title={`Exact value: ${item.mean_selection1?.toExponential(4) || 'N/A'}`}>
-                                          <span>{normValue.display}</span>
-                                        </Tooltip>
-                                      );
-                                    })()}
-                                  </TableCell>
-                                  <TableCell>
-                                    {(() => {
-                                      const normValue = normalizeExpressionValue(item.mean_selection2);
-                                      return (
-                                        <Tooltip title={`Exact value: ${item.mean_selection2?.toExponential(4) || 'N/A'}`}>
-                                          <span>{normValue.display}</span>
-                                        </Tooltip>
-                                      );
-                                    })()}
-                                  </TableCell>
-                                  <TableCell>
-                                    {(() => {
-                                      const log2fcResult = safeFormatLog2FC(item.log2_fold_change);
-                                      return (
-                                        <Box sx={{display: 'flex', alignItems: 'center'}}>
-                                          {log2fcResult.isPositive ? (
-                                            <ArrowUpward sx={{color: 'success.main', mr: 0.5, fontSize: '1rem'}} />
-                                          ) : (
-                                            <ArrowDownward sx={{color: 'error.main', mr: 0.5, fontSize: '1rem'}} />
-                                          )}
-                                          {log2fcResult.display}
-                                          <Tooltip title={`${log2fcResult.isPositive ? 'Increase' : 'Decrease'} of ${log2fcResult.foldChange}`}>
-                                            <Box component="span" sx={{ml: 0.5, color: 'text.secondary', fontSize: '0.8rem'}}>
-                                              ({log2fcResult.foldChange})
-                                            </Box>
-                                          </Tooltip>
-                                        </Box>
-                                      );
-                                    })()}
-                                  </TableCell>
-                                  <TableCell>
-                                    {(() => {
-                                      const { display: qValueDisplay, significance: qValueSignificance } = formatQValue(item.q_value);
-                                      return (
-                                        <Tooltip title={`Exact q-value: ${item.q_value?.toExponential(4) || 'N/A'}`}>
-                                          <span>
-                                            {qValueDisplay} 
-                                            <span style={{ color: '#1976d2', marginLeft: 4 }}>{qValueSignificance}</span>
-                                          </span>
-                                        </Tooltip>
-                                      );
-                                    })()}
-                                  </TableCell>
-                                  <TableCell>
-                                    {roleName}
-                                  </TableCell>
-                                </TableRow>
-                              );
-                            })}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                  </Box>
+                  )}
+                  <Button variant="outlined" sx={{ mt: 2 }} onClick={handleConfirmSelection2SameProject}>Confirm Selection 2</Button>
                 </>
-              ) : (
-                <Typography sx={{mt: 2, fontStyle: 'italic'}}>Comparison successful, but no significant differential expression found at FDR &lt; {fdrThreshold}.</Typography>
               )}
-              {/* Display non-critical errors from successful job run */}
-              {comparisonJobDetails.results?.errors && comparisonJobDetails.results.errors.length > 0 && (
-                <Alert severity="warning" sx={{ mt: 2 }}>
-                   Comparison completed with issues:
-                   <ul style={{ marginTop: '8px', marginBottom: 0 }}>
-                     {comparisonJobDetails.results.errors.map((err: string, i: number) => <li key={i}>{err}</li>)}
-                   </ul>
-                </Alert>
-               )}
-          </Box>
-        )}
-        
-        {/* Message if job hasn't started or status isn't available yet */}
-        {!isLoadingComparisonJobStatus && !comparisonJobDetails && !comparisonJobError && (
-            <Typography sx={{mt: 2, fontStyle: 'italic'}}>Comparison job initiated. Waiting for status updates...</Typography>
-        )}
-        
-        {/* Live filtering options */}
-        {comparisonJobDetails?.status === 'success' && (
-          <Box sx={{ mt: 3, mb: 2, p: 2, border: '1px solid #e0e0e0', borderRadius: 1 }}>
-            <Typography variant="h6" gutterBottom>
-              Filter Results
-            </Typography>
-
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
-                <Box sx={{ flex: '1 1 250px', minWidth: '200px' }}>
-                  <Tooltip title="Minimum absolute Log2 Fold Change value to display">
-                    <TextField
-                      label="Min |Log2FC|"
-                      type="number"
-                      fullWidth
-                      size="small"
-                      InputProps={{ inputProps: { min: 0, step: 0.1 } }}
-                      value={filterMinLog2FC}
-                      onChange={(e) => setFilterMinLog2FC(Math.max(0, parseFloat(e.target.value) || 0))}
-                    />
-                  </Tooltip>
-                </Box>
-                <Box sx={{ flex: '1 1 250px', minWidth: '200px' }}>
-                  <Tooltip title="Maximum adjusted p-value (q-value) to display">
-                    <TextField
-                      label="Max q-value"
-                      type="number"
-                      fullWidth
-                      size="small"
-                      InputProps={{ inputProps: { min: 0, max: 0.1, step: 0.001 } }}
-                      value={filterMaxQValue}
-                      onChange={(e) => setFilterMaxQValue(Math.max(0, Math.min(0.1, parseFloat(e.target.value) || 0.05)))}
-                    />
-                  </Tooltip>
-                </Box>
-                <Box sx={{ flex: '1 1 250px', minWidth: '200px' }}>
-                  <Tooltip title="Minimum mean value in either selection to display">
-                    <TextField
-                      label="Min Mean Value"
-                      type="number"
-                      fullWidth
-                      size="small"
-                      InputProps={{ inputProps: { min: 0, step: 0.0001 } }}
-                      value={filterMinMeanValue}
-                      onChange={(e) => setFilterMinMeanValue(Math.max(0, parseFloat(e.target.value) || 0))}
-                    />
-                  </Tooltip>
-                </Box>
-              </Box>
-              <Box>
-                <FormGroup row>
-                  <FormControlLabel
-                    control={
-                      <Checkbox 
-                        checked={showLigands} 
-                        onChange={(e) => setShowLigands(e.target.checked)}
-                      />
-                    }
-                    label="Show Ligands"
-                  />
-                  <FormControlLabel
-                    control={
-                      <Checkbox 
-                        checked={showReceptors} 
-                        onChange={(e) => setShowReceptors(e.target.checked)}
-                      />
-                    }
-                    label="Show Receptors"
-                  />
-                  <FormControlLabel
-                    control={
-                      <Checkbox 
-                        checked={showLRPairs} 
-                        onChange={(e) => setShowLRPairs(e.target.checked)}
-                      />
-                    }
-                    label="Show L-R Pairs"
-                  />
-                </FormGroup>
-              </Box>
-              
-              {/* Results count - directly inside the Filter Results box */}
-              <Typography variant="body2" color="text.secondary">
-                {comparisonJobDetails.results.results.differential_expression
-                  .filter((item: DifferentialExpressionResultFE) => {
-                    const absLog2FC = Math.abs(item.log2_fold_change || 0);
-                    const maxMean = Math.max(item.mean_selection1 || 0, item.mean_selection2 || 0);
-                    const typeFilter = 
-                      (item.type === 'single_ligand' && showLigands) || 
-                      (item.type === 'single_receptor' && showReceptors) || 
-                      (item.type === 'ligand_receptor_pair' && showLRPairs);
-                      
-                    return absLog2FC >= filterMinLog2FC &&
-                          (item.q_value || 1) <= filterMaxQValue &&
-                          maxMean >= filterMinMeanValue &&
-                          typeFilter;
-                  }).length
-                } of {comparisonJobDetails.results.results.differential_expression.length} significant results displayed
-              </Typography>
             </Box>
+          )}
+
+          {selection2 && (
+            <Box className={styles.selectionBox} sx={{ mb: 4, backgroundColor: '#e3f2fd' }}>
+              <Typography variant="h6" gutterBottom>Selection 2</Typography>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <Typography><strong>Source:</strong> {selection2.source_job_id || 'N/A'}</Typography>
+                <Typography><strong>Type:</strong> {formatSelectionDefinition(selection2.type, selection2.definition)}</Typography>
+              </Box>
+            </Box>
+          )}
+
+          {selection1 && selection2 && (
+            <Box sx={{ mt: 4, pt: 2, borderTop: '1px solid #ccc' }} className={styles.analysisConfigSection}>
+              <Typography variant="h6" gutterBottom>Comparison Parameters</Typography>
+              <TextField 
+                label="Significance Threshold (FDR)" type="number" value={fdrThreshold}
+                onChange={(e) => { const val = parseFloat(e.target.value); if (!isNaN(val) && val >= 0 && val <= 1) setFdrThreshold(val); }}
+                inputProps={{ step: 0.01, min: 0, max: 1 }} sx={{ maxWidth: 300, mb: 3 }} variant="outlined" size="small"
+                helperText="False Discovery Rate threshold (e.g., 0.05)."
+              />
+              <Button variant="contained" color="primary" size="large" className={styles.actionButton} onClick={handleRunComparison} 
+                disabled={isStartingComparison || isLoadingComparisonJobStatus || (comparisonJobDetails?.status === 'running' || comparisonJobDetails?.status === 'pending')}>
+                {(isStartingComparison || isLoadingComparisonJobStatus || comparisonJobDetails?.status === 'running' || comparisonJobDetails?.status === 'pending') 
+                  ? <CircularProgress size={24} color="inherit" /> : 'Run Comparison'} 
+              </Button>
+              {startComparisonError && (<Alert severity="error" sx={{ mt: 2 }}>Failed to start: {startComparisonError}</Alert>)}
+            </Box>
+          )}
+
+          {/* Results Display Component */}
+          {comparisonJobId && selection1 && selection2 && (
+            <ComparisonResultsDisplay
+              comparisonJobId={comparisonJobId}
+              comparisonJobDetails={comparisonJobDetails}
+              isLoadingComparisonJobStatus={isLoadingComparisonJobStatus}
+              comparisonJobError={displayableComparisonJobError}
+              fdrThreshold={fdrThreshold}
+              selection1={selection1}
+              selection2={selection2}
+              filterMinLog2FC={filterMinLog2FC}
+              setFilterMinLog2FC={setFilterMinLog2FC}
+              filterMaxQValue={filterMaxQValue}
+              setFilterMaxQValue={setFilterMaxQValue}
+              filterMinMeanValue={filterMinMeanValue}
+              setFilterMinMeanValue={setFilterMinMeanValue}
+              showLigands={showLigands}
+              setShowLigands={setShowLigands}
+              showReceptors={showReceptors}
+              setShowReceptors={setShowReceptors}
+              showLRPairs={showLRPairs}
+              setShowLRPairs={setShowLRPairs}
+              selectedMolecule={selectedMolecule}
+              handleRowClick={handleRowClick}
+              formatSelectionDefinition={formatSelectionDefinition}
+              styles={styles}
+            />
+          )}
+
+          {/* Interaction Visualization Section */}
+          {selectedMolecule && comparisonJobDetails?.status === 'success' && selection1 && selection2 && (
+            <Box sx={{ 
+              mt: 4, p: 2, border: '1px solid #e0e0e0', borderRadius: 1, position: 'relative',
+              ...(isSelection1Fullscreen || isSelection2Fullscreen ? {
+                position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 1300,
+                backgroundColor: 'white', padding: 4, overflowY: 'auto'
+              } : {})
+            }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6">
+                  Interaction Visualization: {selectedMolecule.type === 'ligand_receptor_pair' ? 
+                    `${selectedMolecule.ligandId} → ${selectedMolecule.receptorId}` : selectedMolecule.id}
+                </Typography>
+                <Box>
+                  {(isSelection1Fullscreen || isSelection2Fullscreen) && (
+                    <Button variant="outlined" size="small" onClick={() => { setIsSelection1Fullscreen(false); setIsSelection2Fullscreen(false); }} sx={{ mr: 1 }}>
+                      Exit Fullscreen
+                    </Button>
+                  )}
+                  <Button variant="outlined" size="small" onClick={handleCloseVisualization}>Close</Button>
+                </Box>
+              </Box>
+              <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: isSelection1Fullscreen || isSelection2Fullscreen ? 'column' : 'row' }, gap: 2 }}>
+                {!isSelection2Fullscreen && (
+                  <Box sx={{ flex: 1, border: '1px solid #e0e0e0', borderRadius: 1, p: 1, position: 'relative', height: isSelection1Fullscreen ? 'calc(100vh - 180px)' : 'auto' }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e0e0e0', pb: 1, mb: 1 }}>
+                      <Typography variant="subtitle1">Selection 1: {formatSelectionDefinition(selection1.type, selection1.definition)}</Typography>
+                      <Button variant="text" size="small" onClick={toggleSelection1Fullscreen}>{isSelection1Fullscreen ? 'Exit Fullscreen' : 'Fullscreen'}</Button>
+                    </Box>
+                    {selection1VizError && <Typography color="error">{selection1VizError}</Typography>}
+                    {renderSelection1Visualization}
+                    {renderSelection1Loading}
+                  </Box>
+                )}
+                {!isSelection1Fullscreen && (
+                  <Box sx={{ flex: 1, border: '1px solid #e0e0e0', borderRadius: 1, p: 1, position: 'relative', height: isSelection2Fullscreen ? 'calc(100vh - 180px)' : 'auto' }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e0e0e0', pb: 1, mb: 1 }}>
+                      <Typography variant="subtitle1">Selection 2: {formatSelectionDefinition(selection2.type, selection2.definition)}</Typography>
+                      <Button variant="text" size="small" onClick={toggleSelection2Fullscreen}>{isSelection2Fullscreen ? 'Exit Fullscreen' : 'Fullscreen'}</Button>
+                    </Box>
+                    {selection2VizError && <Typography color="error">{selection2VizError}</Typography>}
+                    {renderSelection2Visualization}
+                    {renderSelection2Loading}
+                  </Box>
+                )}
+              </Box>
+            </Box>
+          )}
+        
+          {/* Back Button Section */}
+          <Box sx={{ mt: 4, pt: 2, borderTop: '1px solid #ccc' }}>
+            <Button variant="outlined" onClick={handleBackToResults} className={styles.utilityButton}>
+              Back to Results Page (of Selection 1)
+            </Button>
           </Box>
-        )}
-      </Box>
-    )}
-
-    <Box sx={{ mt: 4, pt: 2, borderTop: '1px solid #ccc' }}>
-      <Button variant="outlined" onClick={handleBackToResults} className={styles.utilityButton}>
-        Back to Results Page (of Selection 1)
-      </Button>
-    </Box>
-  </Paper>
-);
-
+        </>
+      ) : (
+        <Typography>Loading or data missing...</Typography> // Loading state if selection1 not ready
+      )}
+    </Paper>
+  );
 }; 
 
 export default ComparisonToolPage;

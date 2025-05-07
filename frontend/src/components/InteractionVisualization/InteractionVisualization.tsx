@@ -184,7 +184,8 @@ type DensityScoringType = 'Off' | 'Ligand' | 'Receptor';
 type AggregationLayerType = 'ScreenGrid' | 'Hexagon' | 'Heatmap';
 type PointsDisplayType = 'off' | 'ligands' | 'receptors' | 'both';
 
-const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ data, ligandName, currentScope, isLoading, cancelFetch, layerBoundaries }) => {
+// Wrap the component with React.memo for shallow prop comparison
+const InteractionVisualization: React.FC<InteractionVisualizationProps> = React.memo(({ data, ligandName, currentScope, isLoading, cancelFetch, layerBoundaries }) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [densityScoringType, setDensityScoringType] = useState<DensityScoringType>('Off'); 
   const [aggregationLayerType, setAggregationLayerType] = useState<AggregationLayerType>('ScreenGrid');
@@ -203,6 +204,16 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
 
   const deckContainerRef = useRef<HTMLDivElement>(null);
 
+  // Add a unique instance ID for debugging in console
+  const instanceId = useRef(`instance_${Math.random().toString(36).substring(2, 8)}`);
+
+  console.log(`[${instanceId.current}] Render InteractionVisualization`, { 
+    dataExists: !!data, 
+    scope: currentScope, 
+    loading: isLoading 
+  });
+
+  // Handle layer boundaries
   useEffect(() => {
     if (layerBoundaries) {
       const validLayers = Object.keys(layerBoundaries).filter(l => layerBoundaries[l] !== null).sort();
@@ -222,25 +233,50 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
 
       setVisibleLayers(new Set(validLayers));
       setAllLayersVisible(true);
-      console.log("[InteractionVisualization] Layers derived from boundaries:", validLayers);
+      console.log(`[${instanceId.current}] Layers derived from boundaries:`, validLayers);
     } else {
-      console.warn("[InteractionVisualization] layerBoundaries prop not provided. Layer controls will be empty.");
+      console.warn(`[${instanceId.current}] layerBoundaries prop not provided. Layer controls will be empty.`);
       setUniqueLayerNames([]);
       setLayerColors({});
       setVisibleLayers(new Set());
       setAllLayersVisible(true);
     }
-  }, [layerBoundaries]);
+  }, [layerBoundaries, instanceId]);
+
+  // Stable deep comparison for data objects to prevent unnecessary recalculations
+  const dataRef = useRef(data);
+  useEffect(() => {
+    // Only update the reference if we have actual data changes, not just object reference changes
+    if (data && (!dataRef.current ||
+        data.ligand.length !== dataRef.current.ligand.length ||
+        data.receptor.length !== dataRef.current.receptor.length ||
+        data.receptorName !== dataRef.current.receptorName ||
+        data.isComplex !== dataRef.current.isComplex)) {
+      console.log(`[${instanceId.current}] Data reference updated due to content change`);
+      dataRef.current = data;
+    }
+  }, [data, instanceId]);
 
   const initialViewState = useMemo(() => {
-      console.log("[InteractionVisualization] Received data:", data);
       if (!data) return { target: [0, 0, 0] as [number, number, number], zoom: 1 }; // Handle null data
       const ligandPts = data.ligand || [];
       const receptorPts = data.receptor || []; // Raw component points
       const state = getInitialViewState(ligandPts, receptorPts, data.isComplex, []);
-      console.log("[InteractionVisualization] Calculated initialViewState:", state);
+      console.log(`[${instanceId.current}] Calculated initialViewState:`, state);
       return state;
-  }, [data]);
+  }, [dataRef.current, instanceId]); // Use the stable ref instead of data directly
+
+  // Calculate complex centroids only once when data changes
+  const complexCentroids = useMemo(() => {
+    if (!data || !data.isComplex) return [];
+    return calculateComplexCentroids(data.receptor, data.receptorName);
+  }, [dataRef.current, instanceId]); // Use the stable ref instead of data directly
+
+  // Determine which receptor points to plot (only recalculate when data or complexCentroids change)
+  const receptorPointsToPlot = useMemo(() => {
+    if (!data) return [];
+    return data.isComplex ? complexCentroids : data.receptor;
+  }, [complexCentroids, dataRef.current, instanceId]); // Use the stable ref instead of data directly
 
   // Initialize state including zoom bounds
   const [viewState, setViewState] = useState<OrthographicViewState>({
@@ -249,13 +285,29 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
     maxZoom: initialViewState.maxZoom ?? 6,
   } as OrthographicViewState);
 
+  // Stable reference to view state to avoid unnecessary updates
+  const prevViewStateRef = useRef(initialViewState);
+
+  // Use a dedicated effect to update view state when initial view state changes
   useEffect(() => {
+    // Skip updates if initialViewState is functionally the same
+    if (
+      prevViewStateRef.current.target?.[0] === initialViewState.target?.[0] &&
+      prevViewStateRef.current.target?.[1] === initialViewState.target?.[1] &&
+      prevViewStateRef.current.target?.[2] === initialViewState.target?.[2] &&
+      prevViewStateRef.current.zoom === initialViewState.zoom
+    ) {
+      return;
+    }
+    
+    prevViewStateRef.current = initialViewState;
+    
     // Update state when initialViewState changes, preserving bounds
-    setViewState({
-        ...initialViewState,
-        minZoom: initialViewState.minZoom ?? -10,
-        maxZoom: initialViewState.maxZoom ?? 6,
-    } as OrthographicViewState);
+    setViewState(prevState => ({
+      ...initialViewState,
+      minZoom: initialViewState.minZoom ?? -10,
+      maxZoom: initialViewState.maxZoom ?? 6,
+    } as OrthographicViewState));
   }, [initialViewState]);
 
   const onViewStateChange = useCallback(({ viewState: vs }: ViewStateChangeParameters<OrthographicViewState>) => {
@@ -299,11 +351,6 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
     // Get receptor name from data 
     const receptorName = data.receptorName;
 
-    // --- Calculate Centroids INSIDE this hook --- 
-    const complexCentroids = data.isComplex
-        ? calculateComplexCentroids(data.receptor, data.receptorName)
-        : []; // Calculate only if complex, otherwise empty
-
     // --- Layer Boundary Logic (unchanged) --- 
     const boundaryLayers = layerBoundaries 
       ? Object.entries(layerBoundaries)
@@ -330,10 +377,6 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
           })
           .filter(layer => layer !== null) // Filter out nulls
       : []; // Empty array if no layerBoundaries prop
-
-    // --- Determine Receptor Points to Plot --- 
-    // Use calculated centroids if complex, otherwise the original component points
-    const receptorPointsToPlot = data.isComplex ? complexCentroids : data.receptor;
 
     console.log(`[InteractionVisualization] Plotting receptors for ${receptorName}. Complex: ${data.isComplex}. Plotting ${receptorPointsToPlot.length} points.`);
 
@@ -508,7 +551,7 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
     ].filter(Boolean); 
 
     return finalLayers as Layer[];
-  }, [data, densityScoringType, pointsDisplayType, aggregationLayerType, isLoading, layerBoundaries, visibleLayers, layerColors, rulerPoints, isRulerActive, rulerHoverCoord]);
+  }, [data, isLoading, visibleLayers, layerColors, pointsDisplayType, densityScoringType, isRulerActive, receptorPointsToPlot, layerBoundaries]);
 
   const toggleFullscreen = () => {
     setIsFullscreen(!isFullscreen);
@@ -805,6 +848,9 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
       </div>
     </div>
   );
-};
+});
+
+// Add a displayName for debugging
+InteractionVisualization.displayName = 'InteractionVisualization';
 
 export default InteractionVisualization; 

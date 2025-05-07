@@ -263,3 +263,15 @@
     border: 1px solid blue; 
     /* Add other active styles */
 } 
+
+/* Add styles for the legend header with fullscreen button */
+.legendHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.legendHeader h4 {
+  margin: 0;
+} 

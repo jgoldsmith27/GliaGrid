@@ -582,7 +582,20 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
       <div className={styles.controlsOverlay}>
           {/* === RESTORED LAYER LEGEND SECTION START === */}
           <div className={styles.controlSection}>
+              <div className={styles.legendHeader}>
               <h4>Layers</h4>
+                  <Tooltip title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}>
+                      <IconButton 
+                          onClick={toggleFullscreen} 
+                          size="small" 
+                          sx={{ padding: '4px', ml: 'auto' }}
+                      >
+                          <Icon sx={{ fontSize: '18px' }}>
+                              {isFullscreen ? 'fullscreen_exit' : 'fullscreen'}
+                          </Icon>
+                      </IconButton>
+                  </Tooltip>
+              </div>
               <div className={styles.layerLegendContainer}>
                 {uniqueLayerNames.length > 0 ? (
                   uniqueLayerNames.map((layerName) => (
