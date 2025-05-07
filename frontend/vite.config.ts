@@ -3,7 +3,9 @@ import react from '@vitejs/plugin-react-swc'
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react()
+  ],
   server: {
     open: false, // Prevent opening browser tab automatically
     port: 5173, // Explicitly define frontend port (optional but good practice)
@@ -14,6 +16,25 @@ export default defineConfig({
         changeOrigin: true,
         // No rewrite needed, backend expects /api
       }
+    }
+  },
+  optimizeDeps: {
+    force: true,
+    include: [
+      'react',
+      'react-dom', 
+      'react-router-dom',
+      '@emotion/styled',
+      '@emotion/react',
+      'styled-components'
+    ]
+  },
+  resolve: {
+    dedupe: ['react', 'react-dom', '@emotion/styled', '@emotion/react']
+  },
+  build: {
+    commonjsOptions: {
+      transformMixedEsModules: true
     }
   }
 })

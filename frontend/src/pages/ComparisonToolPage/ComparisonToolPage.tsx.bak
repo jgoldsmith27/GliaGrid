@@ -1,3 +1,4 @@
+};  // Add missing curly brace
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import styles from './ComparisonToolPage.module.css';
@@ -393,7 +394,7 @@ const ComparisonToolPage: React.FC = () => {
   // --- End of restored and simplified block ---
 
   return (
-    <Paper elevation={2} className={styles.mainContainer}>
+    <Paper className={styles.container} elevation={3}>
       {/* RESTORING Page Title Typography */}
       <Typography variant="h4" gutterBottom className={styles.pageTitle}>
         Comparison Configuration
@@ -1405,7 +1406,5 @@ const ComparisonToolPage: React.FC = () => {
     </Box>
   </Paper>
 );
-
-}; 
 
 export default ComparisonToolPage;

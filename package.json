@@ -30,11 +30,14 @@
     "@deck.gl/layers": "^9.1.11",
     "@deck.gl/react": "^9.1.11",
     "@fontsource/material-icons": "^5.2.5",
+    "@mui/icons-material": "^7.1.0",
+    "@mui/styled-engine-sc": "^7.1.0",
     "chokidar": "^4.0.3",
     "d3-scale": "^4.0.2",
     "d3-scale-chromatic": "^3.1.0",
     "papaparse": "^5.5.2",
     "robust-point-in-polygon": "^1.0.3",
+    "styled-components": "^6.1.17",
     "zeromq": "^6.0.0-beta.16"
   }
 }

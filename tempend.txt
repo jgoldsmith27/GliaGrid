@@ -1,0 +1,5 @@
+  </Paper>
+);
+}; // Fixed missing brace
+
+export default ComparisonToolPage;
