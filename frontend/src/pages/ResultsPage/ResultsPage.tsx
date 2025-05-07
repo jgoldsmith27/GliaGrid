@@ -536,10 +536,20 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
     const spatialFileId = inputs.files?.spatialFileId; 
     const spatialMapping = inputs.mappings?.spatialMapping;
 
-    if (!spatialFileId || !spatialMapping) {
-        console.error("[ResultsPage] File ID or column mappings not found in job status for comparison.", { spatialFileId, spatialMapping });
+    if (!spatialFileId || !spatialMapping) { // Keeping this check for the primary spatial file/mapping
+        console.error("[ResultsPage] Spatial File ID or Spatial Column Mappings not found in job status for comparison.", { inputs });
         // TODO: Optionally show a user-facing error
-        alert("Cannot initiate comparison: File ID or column mappings are missing.");
+        alert("Cannot initiate comparison: Essential spatial file ID or column mappings are missing.");
+        return;
+    }
+    
+    // Get all file IDs and all mappings
+    const allFileIds = inputs.files; 
+    const allMappings = inputs.mappings;
+
+    if (!allFileIds || !allMappings) {
+        console.error("[ResultsPage] Complete File IDs or Column Mappings sets not found in job status.", { inputs });
+        alert("Cannot initiate comparison: Complete file or mapping information is missing from job status.");
         return;
     }
 
@@ -563,10 +573,16 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
 
     const selection1Data = {
         source_job_id: jobId, // From useParams
-        file_id: spatialFileId,
-        type: selectedScope as ScopeType, // Cast selectedScope to ScopeType
+        // file_id: spatialFileId, // Replaced by files object
+        files: allFileIds, // Store all file IDs
+        type: selectedScope === 'layers' 
+              ? 'layer' 
+              : selectedScope === 'custom' 
+              ? 'lasso' 
+              : 'whole_tissue', // Correctly map to backend expected types
         definition: definition,
-        column_mappings: spatialMapping 
+        // column_mappings: spatialMapping // Replaced by mappings object
+        mappings: allMappings // Store all mapping objects
     };
 
     console.log("[ResultsPage] Initiating comparison with Selection 1:", selection1Data);

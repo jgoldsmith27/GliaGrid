@@ -57,5 +57,6 @@ If you encounter issues with large files when cloning or pushing:
 2. If you still have issues, you can download the release version directly from the releases page. 
 
 ### ToDos
-- Complex receptor visualization support
 - add downstream support for H5AD file handlers in rest of pipeline (they do not work currently)
+- Add MIDcount accross app for analysis and visualizations am not currently
+- Implement comparisons with two projects

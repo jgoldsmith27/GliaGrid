@@ -117,6 +117,7 @@ from statsmodels.stats.multitest import multipletests # For FDR correction
 from collections import Counter # For counting molecules
 import math # For log2
 from collections import defaultdict # For Reverse Lookup Maps
+import concurrent.futures # For parallel processing
 
 # ADDED: Helper function from core.py (or make it a shared utility)
 def _split_receptor_complex(receptor_name: str) -> List[str]:
@@ -625,47 +626,53 @@ class AnalysisService:
             
             # Convert DataFrame to GeoDataFrame
             try:
-                # OPTIMIZATION: Use efficient points_from_xy to create geometry
-                gdf_creation_start_time = time.time() # DEBUG
+                # OPTIMIZATION: Use the faster spatial indexing approach already in the codebase
+                # (This is the same method used in run_custom_analysis which is much faster)
+                
+                # Convert DataFrame to GeoDataFrame using efficient points_from_xy
+                gdf_creation_start_time = time.time()
                 spatial_gdf = gpd.GeoDataFrame(
                     spatial_df, geometry=gpd.points_from_xy(spatial_df.x, spatial_df.y)
                 )
-                logger.debug(f"[Custom Analysis {original_job_id}] GeoDataFrame creation duration: {time.time() - gdf_creation_start_time:.4f} seconds.") # DEBUG
+                logger.info(f"GeoDataFrame creation took {time.time() - gdf_creation_start_time:.4f}s")
                 
-                # OPTIMIZATION: Create a spatial index
-                index_start_time = time.time() # DEBUG
-                spatial_gdf.sindex
-                logger.debug(f"[Custom Analysis {original_job_id}] Spatial index creation duration: {time.time() - index_start_time:.4f} seconds.") # DEBUG
+                # Create a spatial index
+                index_start_time = time.time()
+                spatial_gdf.sindex  # This builds the spatial index
+                logger.info(f"Spatial index creation took {time.time() - index_start_time:.4f}s")
                 
                 # Create Shapely Polygon from coordinates
                 lasso_polygon = Polygon(polygon_coords)
                 
-                # OPTIMIZATION: Pre-filter using bounding box intersection
-                bbox_filter_start_time = time.time() # DEBUG
+                # Pre-filter using bounding box intersection
+                bbox_filter_start_time = time.time()
                 possible_matches_index = list(spatial_gdf.sindex.intersection(lasso_polygon.bounds))
                 possible_matches = spatial_gdf.iloc[possible_matches_index]
-                logger.debug(f"[Custom Analysis {original_job_id}] BBox pre-filter reduced points from {len(spatial_gdf)} to {len(possible_matches)}. Duration: {time.time() - bbox_filter_start_time:.4f} seconds.") # DEBUG
+                logger.info(f"BBox pre-filter reduced points from {len(spatial_gdf)} to {len(possible_matches)} ({time.time() - bbox_filter_start_time:.4f}s)")
                 
                 # Perform precise spatial query only on the pre-filtered subset
-                precise_filter_start_time = time.time() # DEBUG
+                precise_filter_start_time = time.time()
                 points_within_lasso = possible_matches[possible_matches.within(lasso_polygon)]
-                logger.debug(f"[Custom Analysis {original_job_id}] Precise filter duration: {time.time() - precise_filter_start_time:.4f} seconds.") # DEBUG
+                logger.info(f"Precise filter took {time.time() - precise_filter_start_time:.4f}s")
                 
-                # Drop the temporary geometry column if needed, keeping the filtered DataFrame
-                filtered_spatial_df = pd.DataFrame(points_within_lasso.drop(columns='geometry'))
-            except Exception as geo_error:
-                 logger.exception(f"Error during geometric filtering: {geo_error}")
-                 raise HTTPException(status_code=500, detail=f"Error during geometric filtering: {geo_error}")
-
-            logger.debug(f"[Custom Analysis {original_job_id}] Filtering duration: {time.time() - filter_start_time:.4f} seconds.") # DEBUG
-            logger.debug(f"[Custom Analysis {original_job_id}] Filtered spatial data contains {len(filtered_spatial_df)} points.") # DEBUG
+                # Drop the geometry column and convert back to DataFrame
+                df_spatial = pd.DataFrame(points_within_lasso.drop(columns='geometry'))
+                
+                logger.info(f"Filtered by lasso polygon: {len(df_spatial)}/{len(spatial_df)} points matched")
+                
+                if df_spatial.empty:
+                     errors.append(f"No data points in lasso.")
+            except Exception as geo_err:
+                logger.exception(f"Error during GeoPandas filtering: {geo_err}")
+                errors.append(f"Failed to apply lasso filter: {geo_err}")
+                return None, errors
 
             # Initialize results containers
             whole_results_data: CustomAnalysisScopeResult = CustomAnalysisScopeResult(pathway_dominance=[], module_context=[])
             layered_results_data: Dict[str, CustomAnalysisScopeResult] = {}
 
             # Check if any points remain after filtering
-            if filtered_spatial_df.empty:
+            if df_spatial.empty:
                  logger.warning(f"[Custom Analysis {original_job_id}] No spatial points found within the lasso selection. Returning empty results bundle.")
                  # Return empty bundle
                  return CustomAnalysisResultsBundle(whole_results=whole_results_data, layered_results=layered_results_data)
@@ -675,7 +682,7 @@ class AnalysisService:
             logger.debug(f"[Custom Analysis {original_job_id}] Calling core single-scope analysis pipeline for whole selection...") # DEBUG
             
             whole_custom_results_dict = await core.run_analysis_pipeline_from_dataframes(
-                all_spatial_df=filtered_spatial_df, # Pass the polygon-filtered spatial data
+                all_spatial_df=df_spatial, # Pass the polygon-filtered spatial data
                 interactions_df=interactions_df,   # Pass the full interactions data
                 modules_df=modules_df            # Pass the full modules data
             )
@@ -690,18 +697,18 @@ class AnalysisService:
 
             # 5. Run Analysis Pipeline Per Layer (if layer column exists)
             layers_call_start_time = time.time() # DEBUG
-            if 'layer' in filtered_spatial_df.columns:
+            if 'layer' in df_spatial.columns:
                 logger.debug(f"[Custom Analysis {original_job_id}] Running layer-specific analysis within the custom selection...") # DEBUG
                 
                 # Ensure layer column is string type for consistent grouping
-                filtered_spatial_df['layer'] = filtered_spatial_df['layer'].astype(str)
-                unique_layers = filtered_spatial_df['layer'].unique()
+                df_spatial['layer'] = df_spatial['layer'].astype(str)
+                unique_layers = df_spatial['layer'].unique()
                 logger.debug(f"[Custom Analysis {original_job_id}] Found layers in selection: {unique_layers}")
 
                 for layer_name in unique_layers:
                     layer_start_time = time.time() # DEBUG
                     logger.debug(f"[Custom Analysis {original_job_id}] Processing layer: {layer_name}")
-                    layer_df = filtered_spatial_df[filtered_spatial_df['layer'] == layer_name]
+                    layer_df = df_spatial[df_spatial['layer'] == layer_name]
                     
                     if layer_df.empty:
                         logger.warning(f"[Custom Analysis {original_job_id}] Skipping empty layer: {layer_name}")
@@ -893,31 +900,33 @@ class AnalysisService:
                 logger.info(f"[Job {job_id}] Comparing L-R pair co-expression using {len(interactions_df)} pairs from DB.")
                 lr_comparison_start_time = time.time()
 
-                # --- Pre-computation using Reverse Lookup Maps ---
-                logger.info(f"[Job {job_id}] Calculating unique spot counts...")
-                calc_spots_start_time = time.time()
-                total_spots_s1 = df1[['x', 'y']].drop_duplicates().shape[0]
-                total_spots_s2 = df2[['x', 'y']].drop_duplicates().shape[0]
-                logger.info(f"[Job {job_id}] Unique spots: S1={total_spots_s1}, S2={total_spots_s2}. Calculation took {time.time() - calc_spots_start_time:.4f}s.")
-
-                logger.info(f"[Job {job_id}] Building gene-to-spots map for Selection 1...")
-                map_s1_start_time = time.time()
+                # --- Create reverse lookup maps from gene to spots (sequential) ---
+                logger.info(f"[Job {job_id}] Building gene-to-spots maps for both selections...")
+                map_creation_start = time.time()
+                
+                # Build maps sequentially instead of in parallel
                 gene_to_spots_map_s1 = defaultdict(set)
-                # Use itertuples for efficiency
+                gene_to_spots_map_s2 = defaultdict(set)
+                
+                # Build map for Selection 1
+                map_s1_start_time = time.time()
                 for row in df1[['gene', 'x', 'y']].itertuples(index=False, name='SpatialPoint'):
                     gene_to_spots_map_s1[row.gene].add((row.x, row.y))
-                logger.info(f"[Job {job_id}] Gene map S1 built in {time.time() - map_s1_start_time:.4f}s. Unique genes mapped: {len(gene_to_spots_map_s1)}")
-
-                logger.info(f"[Job {job_id}] Building gene-to-spots map for Selection 2...")
+                total_spots_s1 = df1[['x', 'y']].drop_duplicates().shape[0]
+                logger.info(f"[Job {job_id}] Gene-to-spots map for Selection 1 built in {time.time() - map_s1_start_time:.4f}s")
+                
+                # Build map for Selection 2
                 map_s2_start_time = time.time()
-                gene_to_spots_map_s2 = defaultdict(set)
                 for row in df2[['gene', 'x', 'y']].itertuples(index=False, name='SpatialPoint'):
                     gene_to_spots_map_s2[row.gene].add((row.x, row.y))
-                logger.info(f"[Job {job_id}] Gene map S2 built in {time.time() - map_s2_start_time:.4f}s. Unique genes mapped: {len(gene_to_spots_map_s2)}")
-                # --- End Pre-computation ---
-
+                total_spots_s2 = df2[['x', 'y']].drop_duplicates().shape[0]
+                logger.info(f"[Job {job_id}] Gene-to-spots map for Selection 2 built in {time.time() - map_s2_start_time:.4f}s")
+                
+                logger.info(f"[Job {job_id}] Gene-to-spots maps built in {time.time() - map_creation_start:.4f}s")
+                logger.info(f"[Job {job_id}] Unique spots: S1={total_spots_s1}, S2={total_spots_s2}")
+                
                 # Check if any spots exist before proceeding
-                if total_spots_s1 > 0 or total_spots_s2 > 0: 
+                if total_spots_s1 > 0 or total_spots_s2 > 0:
                     logger.info(f"[Job {job_id}] Starting L-R pair processing loop for {len(interactions_df)} pairs...")
                     loop_start_time = time.time()
                     processed_pairs_count = 0
@@ -1100,7 +1109,7 @@ class AnalysisService:
                 job_id,
                 status="failed",
                 message=f"Comparison critical failure: {str(ve)}",
-                errors=errors # Include all errors collected so far
+                errors=errors
             )
         except Exception as e:
             logger.exception(f"[Job {job_id}] Comparison analysis failed with unexpected exception: {e}")
@@ -1109,7 +1118,7 @@ class AnalysisService:
                 job_id,
                 status="failed",
                 message=f"Comparison failed unexpectedly: {str(e)}",
-                errors=errors # Include all errors collected so far
+                errors=errors
             )
             
     async def _load_and_filter_selection(self, selection: SelectionData) -> Tuple[pd.DataFrame | None, List[str]]:
@@ -1158,13 +1167,42 @@ class AnalysisService:
                     errors.append("Polygon coordinates missing or insufficient for lasso-type selection.")
                     return None, errors
                 original_count = len(df_spatial)
-                polygon = Polygon(selection.definition.polygon_coords)
+                
+                # Create shapely polygon from coordinates
+                lasso_polygon = Polygon(selection.definition.polygon_coords)
+                
                 try:
-                    geometry = [Point(xy) for xy in zip(df_spatial['x'], df_spatial['y'])]
-                    gdf = gpd.GeoDataFrame(df_spatial, geometry=geometry)
-                    gdf_filtered = gdf[gdf.geometry.within(polygon)]
-                    df_spatial = pd.DataFrame(gdf_filtered.drop(columns='geometry'))
-                    logger.info(f"Filtered by lasso polygon...")
+                    # OPTIMIZATION: Use the faster spatial indexing approach already in the codebase
+                    # (This is the same method used in run_custom_analysis which is much faster)
+                    
+                    # Convert DataFrame to GeoDataFrame using efficient points_from_xy
+                    gdf_creation_start_time = time.time()
+                    spatial_gdf = gpd.GeoDataFrame(
+                        df_spatial, geometry=gpd.points_from_xy(df_spatial.x, df_spatial.y)
+                    )
+                    logger.info(f"GeoDataFrame creation took {time.time() - gdf_creation_start_time:.4f}s")
+                    
+                    # Create a spatial index
+                    index_start_time = time.time()
+                    spatial_gdf.sindex  # This builds the spatial index
+                    logger.info(f"Spatial index creation took {time.time() - index_start_time:.4f}s")
+                    
+                    # Pre-filter using bounding box intersection
+                    bbox_filter_start_time = time.time()
+                    possible_matches_index = list(spatial_gdf.sindex.intersection(lasso_polygon.bounds))
+                    possible_matches = spatial_gdf.iloc[possible_matches_index]
+                    logger.info(f"BBox pre-filter reduced points from {len(spatial_gdf)} to {len(possible_matches)} ({time.time() - bbox_filter_start_time:.4f}s)")
+                    
+                    # Perform precise spatial query only on the pre-filtered subset
+                    precise_filter_start_time = time.time()
+                    points_within_lasso = possible_matches[possible_matches.within(lasso_polygon)]
+                    logger.info(f"Precise filter took {time.time() - precise_filter_start_time:.4f}s")
+                    
+                    # Drop the geometry column and convert back to DataFrame
+                    df_spatial = pd.DataFrame(points_within_lasso.drop(columns='geometry'))
+                    
+                    logger.info(f"Filtered by lasso polygon: {len(df_spatial)}/{original_count} points matched")
+                    
                     if df_spatial.empty:
                          errors.append(f"No data points in lasso.")
                 except Exception as geo_err:
@@ -1189,8 +1227,4 @@ class AnalysisService:
             return None, errors
             
     # --- END: Method for Comparison Analysis --- #
-
-    # ... (Keep run_custom_analysis, etc.) ...
-
-# ... (Keep get_analysis_service_dependency) ...
 
