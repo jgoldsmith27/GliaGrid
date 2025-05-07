@@ -4,8 +4,9 @@ import DeckGL from '@deck.gl/react';
 import { OrthographicView, OrthographicViewState, ViewStateChangeParameters, Color, PickingInfo, MapViewState, Layer } from '@deck.gl/core';
 import { scaleOrdinal } from 'd3-scale';
 import { schemeCategory10 } from 'd3-scale-chromatic'; // Example color scheme
-import IconButton from '@mui/material/IconButton'; // Keep this if other IconButtons are used, otherwise remove
-import Icon from '@mui/material/Icon'; // Use base Icon component
+import IconButton from '@mui/material/IconButton';
+import Icon from '@mui/material/Icon';
+import Button from '@mui/material/Button'; // Import Button
 import styles from './SpatialOverviewVisualization.module.css';
 import { SharedDataStore, useSharedData } from '../../services/data/SharedDataStore'; // Import SharedDataStore
 import LoadingSpinner from '../LoadingSpinner/LoadingSpinner'; // Import LoadingSpinner
@@ -249,47 +250,63 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
       setIsDrawingLasso(false); // Still deactivate drawing MODE
   }, [isDrawingLasso, lassoPoints, onLassoSelect]); 
 
-  // --- Lasso UI Controls --- 
-  const toggleLasso = () => {
-      if (isDrawingLasso) {
-          clearLasso();
-      }
-      setIsDrawingLasso(!isDrawingLasso);
-  };
-
-  const clearLasso = () => {
-      setIsDrawingLasso(false);
-      setLassoPoints([]);
-      // MODIFIED: Call callback with null to clear selection
-      if (onLassoSelect) {
+  // NEW: Centralized state clearing functions
+  const clearLassoState = useCallback(() => {
+    setLassoPoints([]);
+    if (onLassoSelect) {
         onLassoSelect(null);
-      }
-  };
-
-  // --- Ruler Controls ---
-  const toggleRuler = useCallback(() => {
-    setIsRulerActive(prev => {
-        const nextIsActive = !prev;
-        // Clear points and distance when toggling ruler off
-        if (!nextIsActive) { 
-          setRulerPoints([]);
-          setRulerDistanceMicrons(null);
-        }
-        // Ensure lasso is off when ruler is activated
-        if (nextIsActive) {
-            setIsDrawingLasso(false); 
-            setLassoPoints([]); 
-            if (onLassoSelect) onLassoSelect(null); // Clear external lasso state too
-        }
-        return nextIsActive;
-    });
+    }
   }, [onLassoSelect]);
 
-  const clearRuler = useCallback(() => {
-    setRulerPoints([]);
-    setRulerDistanceMicrons(null);
-    // Keep ruler active after clearing, user can click again or toggle off
+  const clearRulerState = useCallback(() => {
+      setRulerPoints([]);
+      setRulerDistanceMicrons(null);
+      setRulerHoverCoord(null);
   }, []);
+
+  // MODIFIED: toggleLasso for mutual exclusivity
+  const toggleLasso = useCallback(() => {
+    setIsDrawingLasso(prevIsDrawingLasso => {
+        const nextIsDrawingLasso = !prevIsDrawingLasso;
+        if (nextIsDrawingLasso) {
+            // Activating Lasso: Deactivate and clear ruler
+            setIsRulerActive(false);
+            clearRulerState();
+        } else {
+            // Deactivating Lasso (e.g. clicking toggle when active): Clear its own state
+            clearLassoState();
+        }
+        return nextIsDrawingLasso;
+    });
+  }, [clearLassoState, clearRulerState]);
+
+  // MODIFIED: toggleRuler for mutual exclusivity
+  const toggleRuler = useCallback(() => {
+    setIsRulerActive(prevIsRulerActive => {
+        const nextIsRulerActive = !prevIsRulerActive;
+        if (nextIsRulerActive) {
+            // Activating Ruler: Deactivate and clear lasso
+            setIsDrawingLasso(false);
+            clearLassoState();
+        } else {
+            // Deactivating Ruler (e.g. clicking toggle when active): Clear its own state
+            clearRulerState();
+        }
+        return nextIsRulerActive;
+    });
+  }, [clearLassoState, clearRulerState]);
+
+  // MODIFIED: Action for the explicit "Clear Selection" (X) button
+  const clearLassoButtonAction = useCallback(() => {
+    clearLassoState();
+    setIsDrawingLasso(false); // Ensure drawing mode is also turned off
+  }, [clearLassoState]);
+
+  // MODIFIED: Action for the explicit "Clear Measurement" (X) button
+  const clearRulerButtonAction = useCallback(() => {
+    clearRulerState();
+    // setIsRulerActive(false); // Optional: User can decide if clearing measurement also deactivates ruler tool
+  }, [clearRulerState]);
 
   // --- DeckGL Click Handler for Ruler ---
   const handleDeckClick = useCallback((info: PickingInfo, event: any) => {
@@ -414,7 +431,7 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
                id: 'ruler-path',
                data: [{ path: rulerPathData }],
                getPath: d => d.path,
-               getColor: [0, 200, 200, 200], // Cyan with some transparency
+               getColor: [255, 0, 0, 120], // Bright red with transparency
                getWidth: 2,
                widthMinPixels: 2,
                billboard: true, 
@@ -428,7 +445,7 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
                id: 'ruler-points',
                data: rulerPoints.map(p => ({ coordinates: p })), 
                getPosition: d => d.coordinates,
-               getFillColor: [0, 200, 200, 255], // Solid Cyan color for points
+               getFillColor: [255, 0, 0, 150], // Bright red with more transparency for points
                getRadius: 5, 
                radiusScale: 1, 
                radiusMinPixels: 3, 
@@ -536,19 +553,22 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
 
         {/* Ruler Distance Display - Improved Styling */} 
         {rulerDistanceMicrons !== null && (
-            <div className={styles.measurementDisplay}> {/* Use a dedicated class */} 
-                <Icon sx={{ fontSize: 16, mr: 0.5, color: '#00c8c8' }}>straighten</Icon> {/* Optional Icon */} 
+            <div className={styles.measurementDisplay}>
+                <Icon sx={{ fontSize: 16, mr: 0.5, color: 'black' }}>straighten</Icon>
                 <span>{`Distance: ${rulerDistanceMicrons.toFixed(1)} µm`}</span>
-                <Tooltip title="Clear Measurement">
-                    <IconButton size="small" onClick={clearRuler} sx={{ ml: 0.5, p: '2px' }}>
-                        <Icon fontSize="inherit">close</Icon>
-                    </IconButton>
-                </Tooltip>
+                {rulerPoints.length > 0 && (
+                    <Tooltip title="Clear Measurement">
+                        <IconButton size="small" onClick={clearRulerButtonAction} sx={{ ml: 0.5, p: '2px' }}>
+                            <Icon sx={{ color: 'black'}} fontSize="inherit">close</Icon>
+                        </IconButton>
+                    </Tooltip>
+                )}
             </div>
         )}
       </div>
       {/* Controls Overlay */} 
       <div className={styles.controlsOverlay}>
+          {/* === RESTORED LAYER LEGEND SECTION START === */}
           <div className={styles.controlSection}>
               <h4>Layers</h4>
               <div className={styles.layerLegendContainer}>
@@ -560,13 +580,11 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
                         readOnly // Control checked state via parent div click
                         className={styles.layerToggleCheckbox}
                         checked={visibleLayers.has(layerName)}
-                        // Remove onChange handler, handled by div click
-                        disabled={isDrawingLasso} 
+                        disabled={isDrawingLasso || isRulerActive} // Ensure checkboxes are disabled if a tool is active
                       />
-                      {/* Ensure color swatch uses the correct class */}
                       <span 
                         className={styles.legendColorSwatch} 
-                        style={{ backgroundColor: `rgba(${layerColors[layerName]?.join(',')})` }}
+                        style={{ backgroundColor: `rgba(${layerColors[layerName]?.join(',') || '128,128,128,0.5'})` }} // Added fallback for color
                       ></span>
                       <span className={styles.layerNameText}>{layerName}</span>
                     </div>
@@ -576,6 +594,8 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
                 )}
               </div>
           </div>
+          {/* === RESTORED LAYER LEGEND SECTION END === */}
+          
           {/* Tools Section */} 
           <div className={styles.toolsSection}> 
                 {/* Lasso Controls */} 
@@ -583,60 +603,64 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
                     <h4>Selection</h4>
                     <div className={styles.toolButtons}> 
                         <Tooltip title={isDrawingLasso ? "Cancel Lasso" : "Start Lasso"}>
-                            <span> {/* Span needed for tooltip on disabled button */} 
-                            <IconButton onClick={toggleLasso} disabled={isRulerActive} color={isDrawingLasso ? 'secondary' : 'default'}>
-                                <Icon>gesture</Icon> {/* Example lasso icon */} 
+                            <span> 
+                            <IconButton onClick={toggleLasso} color={isDrawingLasso ? 'secondary' : 'default'} sx={{ padding: '6px' }}> 
+                                <Icon sx={{ color: 'black', fontSize: '20px !important' }}>gesture</Icon>
                             </IconButton>
                             </span>
                         </Tooltip>
-                        <Tooltip title="Clear Selection">
-                             <span> {/* Span needed for tooltip on disabled button */} 
-                             <IconButton onClick={clearLasso} disabled={lassoPoints.length === 0 || isRulerActive} size="small">
-                                 <Icon fontSize="inherit">clear_all</Icon> {/* Example clear icon */} 
-                             </IconButton>
-                             </span>
-                        </Tooltip>
-                        <Tooltip title="Analyze Selection">
-                             <span> {/* Span needed for tooltip on disabled button */} 
-                             <IconButton onClick={onAnalyzeSelection} disabled={lassoPoints.length < 4 || isDrawingLasso || isRulerActive} size="small">
-                                 <Icon fontSize="inherit">analytics</Icon> {/* Example analyze icon */} 
-                             </IconButton>
-                             </span>
-                        </Tooltip>
+                        {lassoPoints.length > 0 && (
+                            <Tooltip title="Clear Selection">
+                                 <span> 
+                                 <IconButton onClick={clearLassoButtonAction} disabled={isRulerActive} size="small" sx={{ padding: '4px' }}>
+                                     <Icon sx={{ color: 'black', fontSize: '18px !important' }} fontSize="inherit">close</Icon>
+                                 </IconButton>
+                                 </span>
+                            </Tooltip>
+                        )}
                     </div>
+                    <Tooltip title="Analyze Selection">
+                        <span> 
+                        <Button 
+                            variant="outlined"
+                            color="primary"
+                            onClick={onAnalyzeSelection} 
+                            disabled={lassoPoints.length < 4 || isDrawingLasso || isRulerActive} 
+                            size="small"
+                            sx={{ mt: 1.5, width: '100%' }}
+                        >
+                            Analyze Selection
+                        </Button>
+                        </span>
+                    </Tooltip>
                 </div>
                 {/* Ruler Controls */} 
                 <div className={`${styles.controlSection} ${styles.toolGroup}`}> 
                     <h4>Measure</h4>
                     <div className={styles.toolButtons}> 
                         <Tooltip title={isRulerActive ? "Deactivate Ruler" : "Activate Ruler"}>
-                             <span> {/* Span needed for tooltip on disabled button */} 
-                            <IconButton onClick={toggleRuler} disabled={isDrawingLasso} color={isRulerActive ? "primary" : "default"}>
-                                <Icon>straighten</Icon>
+                             <span> 
+                            <IconButton onClick={toggleRuler} color={isRulerActive ? "primary" : "default"} sx={{ padding: '6px' }}>
+                                <Icon sx={{ color: 'black', fontSize: '20px !important' }}>straighten</Icon>
                             </IconButton>
                              </span>
                         </Tooltip>
-                        <Tooltip title="Clear Measurement">
-                             <span> {/* Span needed for tooltip on disabled button */} 
-                             <IconButton onClick={clearRuler} disabled={rulerPoints.length === 0} size="small">
-                                 <Icon fontSize="inherit">close</Icon>
-                             </IconButton>
-                             </span>
-                        </Tooltip>
+                        {rulerPoints.length > 0 && (
+                            <Tooltip title="Clear Measurement">
+                                 <span> 
+                                 <IconButton onClick={clearRulerButtonAction} disabled={isDrawingLasso} size="small" sx={{ padding: '4px' }}>
+                                     <Icon sx={{ color: 'black', fontSize: '18px !important' }} fontSize="inherit">close</Icon>
+                                 </IconButton>
+                                 </span>
+                            </Tooltip>
+                        )}
                     </div>
                 </div>
           </div>
       </div>
-      {/* Fullscreen Toggle Button - Use standard button with unicode characters */}
-      <button 
-          onClick={toggleFullscreen} 
-          className={styles.fullscreenButton} // Apply the style class
-          title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
-      >
-        {isFullscreen ? '✕' : '⛶'}
-      </button>
+      {/* Fullscreen Toggle Button ... */}
     </div>
   );
 };
 
-export default SpatialOverviewVisualization; 
+export default SpatialOverviewVisualization;

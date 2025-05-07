@@ -165,39 +165,45 @@
 }
 
 /* Adjust overlay controls styling */
-.deckOverlayControls {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  z-index: 10;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start; /* Align items to the start (left) */
-  gap: 16px; /* Increased gap for better separation */
-  background-color: rgba(255, 255, 255, 0.95); /* Slightly more opaque */
-  padding: 16px;
-  padding-right: 8px; /* Reduce right padding slightly for scrollbar space */
-  border-radius: 8px; /* Match panels */
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1); /* Tailwind shadow-md */
-  max-width: 280px; /* Slightly wider */
-  overflow-y: scroll; /* Always show vertical scrollbar */
-  /* max-height: calc(100vh - 32px); */ /* Replaced vh-based height */
-  max-height: 500px; /* Set max-height relative to parent container's fixed height */
+.controlsOverlay {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+    background-color: rgba(255, 255, 255, 0.9);
+    padding: 12px;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+    max-width: 320px; /* Increased max-width */
+    max-height: calc(100% - 80px); /* Adjust max height relative to parent */
+    overflow-y: auto; /* Ensure vertical scroll if needed */
+    overflow-x: hidden; /* Prevent horizontal scroll */
 }
 
 /* Update button styles */
-.deckOverlayControls button {
+.deckButtons button {
     background: #fff;
     border: 1px solid #cbd5e1; /* Cool Gray 300 */
     border-radius: 6px;
-    padding: 6px 10px;
+    padding: 4px; /* Reduced padding for a tighter fit */
+    min-width: 32px; /* Ensure a minimum width for better appearance */
+    min-height: 32px; /* Ensure a minimum height */
+    line-height: 1; /* For better vertical centering of text/icons */
     cursor: pointer;
-    font-size: 0.9em; 
+    font-size: 1.2em; /* Slightly increased font size for characters */
     font-weight: 500;
     color: #334155; /* Cool Gray 700 */
+    font-family: Arial, sans-serif !important; /* Explicitly set a common font, IMPORTANT */
     transition: background-color 0.2s, border-color 0.2s;
+    display: flex; /* For centering content */
+    align-items: center; /* For centering content */
+    justify-content: center; /* For centering content */
 }
-.deckOverlayControls button:hover {
+.deckButtons button:hover {
     background: #f8fafc; /* Cool Gray 50 */
     border-color: #94a3b8; /* Cool Gray 400 */
 }
@@ -205,6 +211,40 @@
 .zoomControls {
   display: flex;
   gap: 8px;
+}
+
+/* Added rule for the container of deck control buttons */
+.deckButtons {
+    display: flex;
+    align-items: center;
+    gap: 8px; /* Provides spacing between items: zoomControls div, ruler IconButton, fullscreen button */
+}
+
+/* Styles for individual buttons within .deckButtons */
+.deckButtons button,
+.deckButtons .MuiIconButton-root { /* Target MUI IconButton specifically too if needed */
+    background: #fff;
+    border: 1px solid #cbd5e1; /* Cool Gray 300 */
+    border-radius: 6px;
+    padding: 4px; /* Reduced padding for a tighter fit */
+    min-width: 32px; /* Ensure a minimum width for better appearance */
+    min-height: 32px; /* Ensure a minimum height */
+    line-height: 1; /* For better vertical centering of text/icons */
+    cursor: pointer;
+    font-size: 1.2em; /* Slightly increased font size for characters */
+    font-weight: 500;
+    color: #334155; /* Cool Gray 700 */
+    font-family: Arial, sans-serif !important;
+    transition: background-color 0.2s, border-color 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.deckButtons button:hover,
+.deckButtons .MuiIconButton-root:hover {
+    background: #f8fafc; /* Cool Gray 50 */
+    border-color: #94a3b8; /* Cool Gray 400 */
 }
 
 /* Legend styling */
@@ -409,7 +449,7 @@
 /* Rename file to frontend/src/components/InteractionVisualization/InteractionVisualization.module.css */ 
 
 /* --- ADDED: Override for Fullscreen --- */
-.fullscreen .deckOverlayControls {
+.fullscreen .deckButtons {
   max-height: calc(100vh - 32px); /* Allow more height in fullscreen, relative to viewport */
   overflow-y: auto; /* Show scrollbar only if needed in fullscreen */
 }

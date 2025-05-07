@@ -477,7 +477,7 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
             id: 'ruler-path',
             data: [{ path: rulerPathData }],
             getPath: d => d.path,
-            getColor: [0, 200, 200, 200], // Cyan with transparency
+            getColor: [255, 0, 0, 120], // Bright red with transparency
             getWidth: 2,
             widthMinPixels: 2,
             billboard: true, 
@@ -490,7 +490,7 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
             id: 'ruler-points',
             data: rulerPoints.map(p => ({ coordinates: p })), 
             getPosition: d => d.coordinates,
-            getFillColor: [0, 200, 200, 255],
+            getFillColor: [255, 0, 0, 150], // Bright red with more transparency for points
             getRadius: 5, 
             radiusScale: 1, 
             radiusMinPixels: 3, 
@@ -543,22 +543,31 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
     }
   }, [allLayersVisible, uniqueLayerNames]);
 
-  // --- Ruler Controls ---
-  const toggleRuler = useCallback(() => {
-    setIsRulerActive(prev => {
-        const nextIsActive = !prev;
-        if (!nextIsActive) { // Clear on deactivation
-          setRulerPoints([]);
-          setRulerDistanceMicrons(null);
-        }
-        return nextIsActive;
-    });
-  }, []);
-
-  const clearRuler = useCallback(() => {
+  // NEW: Centralized state clearing for ruler
+  const clearRulerStateInteraction = useCallback(() => {
     setRulerPoints([]);
     setRulerDistanceMicrons(null);
+    setRulerHoverCoord(null);
   }, []);
+
+  // MODIFIED: toggleRuler to use clearRulerStateInteraction
+  const toggleRuler = useCallback(() => {
+    setIsRulerActive(prevIsRulerActive => {
+        const nextIsRulerActive = !prevIsRulerActive;
+        if (!nextIsRulerActive) { // If deactivating ruler
+            clearRulerStateInteraction();
+        } else { // If activating ruler
+            setRulerHoverCoord(null); // Clear hover on activation (or re-activation after clearing points)
+        }
+        return nextIsRulerActive;
+    });
+  }, [clearRulerStateInteraction]);
+
+  // MODIFIED: Action for the explicit "Clear Measurement" (X) button in the popup
+  const clearRulerButtonAction = useCallback(() => {
+    clearRulerStateInteraction();
+    // setIsRulerActive(false); // Optional: User can decide if clearing measurement also deactivates ruler tool
+  }, [clearRulerStateInteraction]);
 
   // --- DeckGL Click Handler for Ruler ---
   const handleDeckClick = useCallback((info: PickingInfo, event: any) => {
@@ -649,17 +658,19 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
         )}
         {rulerDistanceMicrons !== null && (
             <div className={styles.measurementDisplay}>
-                <Icon sx={{ fontSize: 16, mr: 0.5, color: '#00c8c8' }}>straighten</Icon>
+                <Icon sx={{ fontSize: 16, mr: 0.5, color: 'black' }}>straighten</Icon>
                 <span>{`Distance: ${rulerDistanceMicrons.toFixed(1)} µm`}</span>
-                <Tooltip title="Clear Measurement">
-                    <IconButton size="small" onClick={clearRuler} sx={{ ml: 0.5, p: '2px' }}>
-                        <Icon fontSize="inherit">close</Icon>
-                    </IconButton>
-                 </Tooltip>
+                {rulerPoints.length > 0 && (
+                    <Tooltip title="Clear Measurement">
+                        <IconButton size="small" onClick={clearRulerButtonAction} sx={{ ml: 0.5, p: '2px' }}>
+                            <Icon fontSize="inherit" sx={{ color: 'black' }}>close</Icon>
+                        </IconButton>
+                     </Tooltip>
+                )}
             </div>
         )}
         {!isLoading && (
-          <div className={styles.deckOverlayControls}>
+          <div className={styles.controlsOverlay}>
               <div className={styles.deckButtons}>
                   <div className={styles.zoomControls}>
                       <Tooltip title="Zoom In">
@@ -671,7 +682,7 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
                   </div>
                   <Tooltip title={isRulerActive ? "Deactivate Ruler" : "Activate Ruler"}>
                        <IconButton onClick={toggleRuler} color={isRulerActive ? "primary" : "default"} size="small">
-                           <Icon>straighten</Icon>
+                           <Icon sx={{ color: 'black', fontSize: '20px !important' }}>straighten</Icon>
                        </IconButton>
                   </Tooltip>
                   <Tooltip title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}>
