@@ -204,4 +204,61 @@
 .errorMessage {
    color: #b91c1c; /* Red 700 */
    font-weight: 500;
+}
+
+/* Ruler Distance Display */
+.measurementDisplay {
+    position: absolute;
+    bottom: 60px; /* Position above scale bar */
+    left: 20px;
+    background-color: rgba(255, 255, 255, 0.8);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    color: #333;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.measurementDisplay span {
+    margin-right: 4px;
+}
+
+/* Styles for grouping tools */
+.toolsSection {
+    display: flex;
+    flex-direction: column; /* Stack tool groups vertically */
+    gap: 12px;
+    margin-top: 16px;
+}
+
+.toolGroup {
+    /* Inherits from controlSection */
+    padding: 8px;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    background-color: #f8fafc; 
+}
+
+.toolGroup h4 {
+    margin-top: 0;
+    margin-bottom: 8px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #4b5563;
+    text-transform: uppercase;
+}
+
+.toolButtons {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+/* Ensure Lasso active button style is defined */
+.activeLasso {
+    border: 1px solid blue; 
+    /* Add other active styles */
 } 

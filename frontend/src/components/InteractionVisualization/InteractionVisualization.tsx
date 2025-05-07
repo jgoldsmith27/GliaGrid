@@ -1,11 +1,11 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { ScatterplotLayer, PolygonLayer } from '@deck.gl/layers';
+import { ScatterplotLayer, PolygonLayer, PathLayer } from '@deck.gl/layers';
 import { ScreenGridLayer, HeatmapLayer, HexagonLayer } from '@deck.gl/aggregation-layers';
 import DeckGL from '@deck.gl/react';
-import { OrthographicView, OrthographicViewState, ViewStateChangeParameters, Color } from '@deck.gl/core';
+import { OrthographicView, OrthographicViewState, ViewStateChangeParameters, Color, PickingInfo, Layer } from '@deck.gl/core';
 import { scaleOrdinal } from 'd3-scale';
 import { schemeCategory10 } from 'd3-scale-chromatic';
-import { Button, CircularProgress, Box } from '@mui/material';
+import { Button, CircularProgress, Box, IconButton, Icon, Tooltip } from '@mui/material';
 import styles from './InteractionVisualization.module.css';
 import ScaleBar from '../VisualizationHelpers/ScaleBar';
 
@@ -195,6 +195,12 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
   const [uniqueLayerNames, setUniqueLayerNames] = useState<string[]>([]);
   const [allLayersVisible, setAllLayersVisible] = useState(true);
 
+  // --- Ruler State ---
+  const [isRulerActive, setIsRulerActive] = useState(false);
+  const [rulerPoints, setRulerPoints] = useState<[number, number][]>([]);
+  const [rulerDistanceMicrons, setRulerDistanceMicrons] = useState<number | null>(null);
+  const [rulerHoverCoord, setRulerHoverCoord] = useState<[number, number] | null>(null);
+
   const deckContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -343,7 +349,7 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
             getPosition: (d) => [d.x, d.y],
             getRadius: 5,
             getFillColor: [255, 0, 0, 180], // Red
-            pickable: true,
+            pickable: !isRulerActive, // Disable picking if ruler active
             radiusScale: 5,
             radiusMinPixels: 1,
             radiusMaxPixels: 50,
@@ -361,7 +367,7 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
             getPosition: (d) => [d.x, d.y],
             getRadius: 5,
             getFillColor: [0, 0, 255, 180], // Blue
-            pickable: true,
+            pickable: !isRulerActive, // Disable picking if ruler active
             radiusScale: 5,
             radiusMinPixels: 1,
             radiusMaxPixels: 50,
@@ -456,37 +462,53 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
       }
     }
 
-    // --- Combine Layers --- 
-    const finalLayers = [];
-    // Add boundaries first (render underneath)
-    finalLayers.push(...boundaryLayers);
+    // --- Add Ruler Layers (Path and Points) ---
+    let rulerLayers: Layer[] = [];
+    let rulerPathData: [number, number][] | null = null;
 
-    // Then add aggregation layer if active
-    if (aggregationLayer) {
-        finalLayers.push(aggregationLayer);
+    if (rulerPoints.length === 1 && rulerHoverCoord) {
+        rulerPathData = [rulerPoints[0], rulerHoverCoord];
+    } else if (rulerPoints.length === 2) {
+        rulerPathData = rulerPoints;
+    }
+
+    if (rulerPathData) {
+        rulerLayers.push(new PathLayer({
+            id: 'ruler-path',
+            data: [{ path: rulerPathData }],
+            getPath: d => d.path,
+            getColor: [0, 200, 200, 200], // Cyan with transparency
+            getWidth: 2,
+            widthMinPixels: 2,
+            billboard: true, 
+            pickable: false,
+        }));
     }
     
-    // --- Directly add scatterplot layers based on pointsDisplayType --- 
-    // Note: baseLayers array contains ligand layer at [0] and receptor layer at [1]
-    // IF they were created earlier in the hook based on the presence of data.
-    const ligandLayerInstance = baseLayers.find(l => l?.id === 'ligand-layer');
-    const receptorLayerInstance = baseLayers.find(l => l?.id === 'receptor-layer');
-
-    if (pointsDisplayType === 'ligands' || pointsDisplayType === 'both') {
-        if (ligandLayerInstance) {
-            finalLayers.push(ligandLayerInstance);
-        }
-    }
-    if (pointsDisplayType === 'receptors' || pointsDisplayType === 'both') {
-        if (receptorLayerInstance) {
-            finalLayers.push(receptorLayerInstance);
-        }
+    if (rulerPoints.length > 0) {
+        rulerLayers.push(new ScatterplotLayer({
+            id: 'ruler-points',
+            data: rulerPoints.map(p => ({ coordinates: p })), 
+            getPosition: d => d.coordinates,
+            getFillColor: [0, 200, 200, 255],
+            getRadius: 5, 
+            radiusScale: 1, 
+            radiusMinPixels: 3, 
+            radiusMaxPixels: 10, 
+            pickable: false,
+        }));
     }
 
-    console.log('[InteractionVisualization Layers] Final layers array:', finalLayers.map(l => l?.id));
+    // --- Combine Layers --- 
+    const finalLayers = [
+        ...(boundaryLayers as Layer[]), 
+        aggregationLayer, 
+        ...baseLayers, 
+        ...rulerLayers 
+    ].filter(Boolean); 
 
-    return finalLayers;
-  }, [data, densityScoringType, pointsDisplayType, aggregationLayerType, isLoading, layerBoundaries, visibleLayers, layerColors]);
+    return finalLayers as Layer[];
+  }, [data, densityScoringType, pointsDisplayType, aggregationLayerType, isLoading, layerBoundaries, visibleLayers, layerColors, rulerPoints, isRulerActive, rulerHoverCoord]);
 
   const toggleFullscreen = () => {
     setIsFullscreen(!isFullscreen);
@@ -520,6 +542,60 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
       setVisibleLayers(new Set());
     }
   }, [allLayersVisible, uniqueLayerNames]);
+
+  // --- Ruler Controls ---
+  const toggleRuler = useCallback(() => {
+    setIsRulerActive(prev => {
+        const nextIsActive = !prev;
+        if (!nextIsActive) { // Clear on deactivation
+          setRulerPoints([]);
+          setRulerDistanceMicrons(null);
+        }
+        return nextIsActive;
+    });
+  }, []);
+
+  const clearRuler = useCallback(() => {
+    setRulerPoints([]);
+    setRulerDistanceMicrons(null);
+  }, []);
+
+  // --- DeckGL Click Handler for Ruler ---
+  const handleDeckClick = useCallback((info: PickingInfo, event: any) => {
+    if (isRulerActive && info.coordinate) { 
+      const clickedCoord: [number, number] = [info.coordinate[0], info.coordinate[1]];
+      setRulerHoverCoord(null); // Reset hover coord on click
+      setRulerPoints(prev => {
+        let nextPoints = [...prev];
+        if (nextPoints.length >= 2) {
+          nextPoints = [clickedCoord];
+          setRulerDistanceMicrons(null);
+        } else {
+          nextPoints.push(clickedCoord);
+        }
+        if (nextPoints.length === 2) {
+          const p1 = nextPoints[0];
+          const p2 = nextPoints[1];
+          const dx = p2[0] - p1[0];
+          const dy = p2[1] - p1[1];
+          const distanceUnits = Math.sqrt(dx * dx + dy * dy);
+          const distanceMicrons = distanceUnits / 2; 
+          setRulerDistanceMicrons(distanceMicrons);
+        }
+        return nextPoints;
+      });
+    }
+  }, [isRulerActive]);
+
+  const handleHover = useCallback((info: PickingInfo, event: any) => {
+    if (isRulerActive && rulerPoints.length === 1 && info.coordinate) {
+      setRulerHoverCoord([info.coordinate[0], info.coordinate[1]]);
+    } else {
+      if (rulerHoverCoord !== null) {
+         setRulerHoverCoord(null);
+      }
+    }
+  }, [isRulerActive, rulerPoints.length, rulerHoverCoord]);
 
   return (
     <div ref={deckContainerRef} className={`${styles.interactionVisualizationContainer} ${isFullscreen ? styles.fullscreen : ''}`}>
@@ -560,7 +636,9 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
           controller={true}
           onError={onDeckError}
           layers={layers as any[]}
-          getTooltip={({object}) => object && `Point: (${object.x.toFixed(2)}, ${object.y.toFixed(2)})`}
+          onClick={handleDeckClick}
+          onHover={handleHover}
+          getCursor={({isDragging: deckIsDragging}) => isRulerActive ? 'crosshair' : (deckIsDragging ? 'grabbing' : 'grab')}
           style={{ width: '100%', height: '100%', position: 'relative' }}
         />
         {viewState && typeof viewState.zoom === 'number' && (
@@ -569,121 +647,146 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = ({ dat
             unitsPerMicron={2}
           />
         )}
+        {rulerDistanceMicrons !== null && (
+            <div className={styles.measurementDisplay}>
+                <Icon sx={{ fontSize: 16, mr: 0.5, color: '#00c8c8' }}>straighten</Icon>
+                <span>{`Distance: ${rulerDistanceMicrons.toFixed(1)} µm`}</span>
+                <Tooltip title="Clear Measurement">
+                    <IconButton size="small" onClick={clearRuler} sx={{ ml: 0.5, p: '2px' }}>
+                        <Icon fontSize="inherit">close</Icon>
+                    </IconButton>
+                 </Tooltip>
+            </div>
+        )}
         {!isLoading && (
           <div className={styles.deckOverlayControls}>
               <div className={styles.deckButtons}>
                   <div className={styles.zoomControls}>
-                      <button onClick={() => handleZoom(1)} title="Zoom In">+</button>
-                      <button onClick={() => handleZoom(-1)} title="Zoom Out">-</button>
+                      <Tooltip title="Zoom In">
+                          <button onClick={() => handleZoom(1)} >+</button>
+                      </Tooltip>
+                      <Tooltip title="Zoom Out">
+                           <button onClick={() => handleZoom(-1)} >-</button>
+                      </Tooltip>
                   </div>
-                  <button 
-                      className={styles.fullscreenButton}
-                      onClick={toggleFullscreen}
-                      title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
-                  >
-                      {isFullscreen ? "✕" : "⛶"}
-                  </button>
-              </div>
-              <div className={styles.legendContainer}>
-                  {(pointsDisplayType === 'ligands' || pointsDisplayType === 'both') && (
-                      <div className={styles.legendItem}>
-                          <div className={styles.legendColor} style={{ backgroundColor: 'red' }} />
-                          <span>{ligandName}</span>
-                      </div>
-                  )}
-                  {(pointsDisplayType === 'receptors' || pointsDisplayType === 'both') && (
-                      <div className={styles.legendItem}>
-                          <div className={styles.legendColor} style={{ backgroundColor: 'blue' }} />
-                          <span>{data ? data.receptorName : 'Receptor'}</span>
-                      </div>
-                  )}
-                  <div className={styles.controlGroup}>
-                      <span className={styles.controlLabel}>Density Scoring:</span>
-                      <label>
-                          <input type="radio" name="densityScoring" value="Off" checked={densityScoringType === 'Off'} onChange={() => setDensityScoringType('Off')} />
-                          Off
-                      </label>
-                      <label>
-                          <input type="radio" name="densityScoring" value="Ligand" checked={densityScoringType === 'Ligand'} onChange={() => setDensityScoringType('Ligand')} disabled={!data || data.ligand.length === 0} />
-                          Ligand Density
-                      </label>
-                      <label>
-                          <input type="radio" name="densityScoring" value="Receptor" checked={densityScoringType === 'Receptor'} onChange={() => setDensityScoringType('Receptor')} disabled={!data || data.receptor.length === 0} />
-                          Receptor Density
-                      </label>
-                  </div>
-                  <div className={styles.controlGroup} >
-                       <span className={styles.controlLabel}>Density Style:</span>
-                      <label>
-                          <input type="radio" name="aggType" value="ScreenGrid" checked={aggregationLayerType === 'ScreenGrid'} onChange={() => setAggregationLayerType('ScreenGrid')} disabled={densityScoringType === 'Off'} />
-                          Grid
-                      </label>
-                       <label>
-                          <input type="radio" name="aggType" value="Hexagon" checked={aggregationLayerType === 'Hexagon'} onChange={() => setAggregationLayerType('Hexagon')} disabled={densityScoringType === 'Off'} />
-                          Hexagon
-                      </label>
-                      <label>
-                          <input type="radio" name="aggType" value="Heatmap" checked={aggregationLayerType === 'Heatmap'} onChange={() => setAggregationLayerType('Heatmap')} disabled={densityScoringType === 'Off'} />
-                          Heatmap
-                      </label>
-                  </div>
-                  <div className={styles.controlGroup}>
-                      <span className={styles.controlLabel}>Points:</span>
-                      <label>
-                          <input type="radio" name="pointsDisplay" value="off" checked={pointsDisplayType === 'off'} onChange={() => setPointsDisplayType('off')} />
-                          Off
-                      </label>
-                           <label>
-                              <input type="radio" name="pointsDisplay" value="ligands" checked={pointsDisplayType === 'ligands'} onChange={() => setPointsDisplayType('ligands')} disabled={!data || data.ligand.length === 0} />
-                              Ligands Only
-                          </label>
-                           <label>
-                              <input type="radio" name="pointsDisplay" value="receptors" checked={pointsDisplayType === 'receptors'} onChange={() => setPointsDisplayType('receptors')} disabled={!data || data.receptor.length === 0} />
-                              Receptors Only
-                          </label>
-                           <label>
-                              <input type="radio" name="pointsDisplay" value="both" checked={pointsDisplayType === 'both'} onChange={() => setPointsDisplayType('both')} disabled={!data || data.ligand.length === 0 || data.receptor.length === 0}/>
-                              Show Both
-                          </label>
-                  </div>
-              </div>
-              <div className={styles.controlSection}>
-                  <div className={styles.layerHeader}>
-                      <h4>Layers</h4>
+                  <Tooltip title={isRulerActive ? "Deactivate Ruler" : "Activate Ruler"}>
+                       <IconButton onClick={toggleRuler} color={isRulerActive ? "primary" : "default"} size="small">
+                           <Icon>straighten</Icon>
+                       </IconButton>
+                  </Tooltip>
+                  <Tooltip title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}>
                       <button 
-                          onClick={toggleAllLayers} 
-                          title={allLayersVisible ? "Hide All Layers" : "Show All Layers"}
-                          className={styles.masterLayerToggle}
-                          disabled={uniqueLayerNames.length === 0}
+                          className={styles.fullscreenButton}
+                          onClick={toggleFullscreen}
                       >
-                          {allLayersVisible ? "Hide All" : "Show All"}
+                          {isFullscreen ? "✕" : "⛶"}
                       </button>
+                   </Tooltip>
+              </div>
+              <div className={styles.legendAndControlsContainer}>
+                  <div className={styles.legendContainer}>
+                      {(pointsDisplayType === 'ligands' || pointsDisplayType === 'both') && (
+                          <div className={styles.legendItem}>
+                              <div className={styles.legendColor} style={{ backgroundColor: 'red' }} />
+                              <span>{ligandName}</span>
+                          </div>
+                      )}
+                      {(pointsDisplayType === 'receptors' || pointsDisplayType === 'both') && (
+                          <div className={styles.legendItem}>
+                              <div className={styles.legendColor} style={{ backgroundColor: 'blue' }} />
+                              <span>{data ? data.receptorName : 'Receptor'}</span>
+                          </div>
+                      )}
                   </div>
-                  <div className={styles.layerLegendContainer}>
-                    {uniqueLayerNames.length > 0 ? (
-                      uniqueLayerNames.map((layerName) => (
-                        <div 
-                          key={layerName} 
-                          className={styles.layerControlItem} 
-                          onClick={() => toggleLayerVisibility(layerName)} 
-                          title={`Toggle ${layerName}`}
-                        >
-                          <input
-                            type="checkbox"
-                            readOnly
-                            className={styles.layerToggleCheckbox}
-                            checked={visibleLayers.has(layerName)}
-                          />
-                          <span 
-                            className={styles.legendColorSwatch} 
-                            style={{ backgroundColor: `rgba(${(layerColors[layerName] || [128, 128, 128, 180]).join(',')})` }}
-                          ></span>
-                          <span className={styles.layerNameText}>{layerName}</span>
-                        </div>
-                      ))
-                    ) : (
-                      <p>No layers identified.</p>
-                    )}
+                  <div className={styles.otherControlsContainer}>
+                      <div className={styles.controlGroup}>
+                          <span className={styles.controlLabel}>Density Scoring:</span>
+                          <label>
+                              <input type="radio" name="densityScoring" value="Off" checked={densityScoringType === 'Off'} onChange={() => setDensityScoringType('Off')} />
+                              Off
+                          </label>
+                          <label>
+                              <input type="radio" name="densityScoring" value="Ligand" checked={densityScoringType === 'Ligand'} onChange={() => setDensityScoringType('Ligand')} disabled={!data || data.ligand.length === 0} />
+                              Ligand Density
+                          </label>
+                          <label>
+                              <input type="radio" name="densityScoring" value="Receptor" checked={densityScoringType === 'Receptor'} onChange={() => setDensityScoringType('Receptor')} disabled={!data || data.receptor.length === 0} />
+                              Receptor Density
+                          </label>
+                      </div>
+                      <div className={styles.controlGroup} >
+                           <span className={styles.controlLabel}>Density Style:</span>
+                          <label>
+                              <input type="radio" name="aggType" value="ScreenGrid" checked={aggregationLayerType === 'ScreenGrid'} onChange={() => setAggregationLayerType('ScreenGrid')} disabled={densityScoringType === 'Off'} />
+                              Grid
+                          </label>
+                           <label>
+                              <input type="radio" name="aggType" value="Hexagon" checked={aggregationLayerType === 'Hexagon'} onChange={() => setAggregationLayerType('Hexagon')} disabled={densityScoringType === 'Off'} />
+                              Hexagon
+                          </label>
+                          <label>
+                              <input type="radio" name="aggType" value="Heatmap" checked={aggregationLayerType === 'Heatmap'} onChange={() => setAggregationLayerType('Heatmap')} disabled={densityScoringType === 'Off'} />
+                              Heatmap
+                          </label>
+                      </div>
+                      <div className={styles.controlGroup}>
+                          <span className={styles.controlLabel}>Points:</span>
+                          <label>
+                              <input type="radio" name="pointsDisplay" value="off" checked={pointsDisplayType === 'off'} onChange={() => setPointsDisplayType('off')} />
+                              Off
+                          </label>
+                               <label>
+                                  <input type="radio" name="pointsDisplay" value="ligands" checked={pointsDisplayType === 'ligands'} onChange={() => setPointsDisplayType('ligands')} disabled={!data || data.ligand.length === 0} />
+                                  Ligands Only
+                              </label>
+                               <label>
+                                  <input type="radio" name="pointsDisplay" value="receptors" checked={pointsDisplayType === 'receptors'} onChange={() => setPointsDisplayType('receptors')} disabled={!data || data.receptor.length === 0} />
+                                  Receptors Only
+                              </label>
+                               <label>
+                                  <input type="radio" name="pointsDisplay" value="both" checked={pointsDisplayType === 'both'} onChange={() => setPointsDisplayType('both')} disabled={!data || data.ligand.length === 0 || data.receptor.length === 0}/>
+                                  Show Both
+                              </label>
+                      </div>
+                  </div>
+                  <div className={styles.controlSection}>
+                      <div className={styles.layerHeader}>
+                          <h4>Layers</h4>
+                          <button 
+                              onClick={toggleAllLayers} 
+                              title={allLayersVisible ? "Hide All Layers" : "Show All Layers"}
+                              className={styles.masterLayerToggle}
+                              disabled={uniqueLayerNames.length === 0}
+                          >
+                              {allLayersVisible ? "Hide All" : "Show All"}
+                          </button>
+                      </div>
+                      <div className={styles.layerLegendContainer}>
+                        {uniqueLayerNames.length > 0 ? (
+                          uniqueLayerNames.map((layerName) => (
+                            <div 
+                              key={layerName} 
+                              className={styles.layerControlItem} 
+                              onClick={() => toggleLayerVisibility(layerName)} 
+                              title={`Toggle ${layerName}`}
+                            >
+                              <input
+                                type="checkbox"
+                                readOnly
+                                className={styles.layerToggleCheckbox}
+                                checked={visibleLayers.has(layerName)}
+                              />
+                              <span 
+                                className={styles.legendColorSwatch} 
+                                style={{ backgroundColor: `rgba(${(layerColors[layerName] || [128, 128, 128, 180]).join(',')})` }}
+                              ></span>
+                              <span className={styles.layerNameText}>{layerName}</span>
+                            </div>
+                          ))
+                        ) : (
+                          <p>No layers identified.</p>
+                        )}
+                      </div>
                   </div>
               </div>
           </div>

@@ -1,10 +1,11 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { ScatterplotLayer, PolygonLayer, GeoJsonLayer } from '@deck.gl/layers';
+import { ScatterplotLayer, PolygonLayer, GeoJsonLayer, PathLayer } from '@deck.gl/layers';
 import DeckGL from '@deck.gl/react';
-import { OrthographicView, OrthographicViewState, ViewStateChangeParameters, Color, PickingInfo, MapViewState } from '@deck.gl/core';
+import { OrthographicView, OrthographicViewState, ViewStateChangeParameters, Color, PickingInfo, MapViewState, Layer } from '@deck.gl/core';
 import { scaleOrdinal } from 'd3-scale';
 import { schemeCategory10 } from 'd3-scale-chromatic'; // Example color scheme
 import IconButton from '@mui/material/IconButton'; // Keep this if other IconButtons are used, otherwise remove
+import Icon from '@mui/material/Icon'; // Use base Icon component
 import styles from './SpatialOverviewVisualization.module.css';
 import { SharedDataStore, useSharedData } from '../../services/data/SharedDataStore'; // Import SharedDataStore
 import LoadingSpinner from '../LoadingSpinner/LoadingSpinner'; // Import LoadingSpinner
@@ -14,6 +15,7 @@ import booleanPointInPolygon from '@turf/boolean-point-in-polygon'; // Correct: 
 import { polygon as turfPolygon, point as turfPoint, feature, polygon, lineString as turfLineString } from '@turf/helpers'; // Correct: Named imports + types
 import { Feature as GeoJsonFeature, Point as GeoJsonPoint, GeoJsonProperties, Polygon } from 'geojson'; // Import GeoJSON types
 import ScaleBar from '../VisualizationHelpers/ScaleBar'; // Import the new ScaleBar component
+import Tooltip from '@mui/material/Tooltip'; // Import Tooltip
 
 // Define types locally or import from a central types file
 // Removed SpatialPoint definition as PointFeature is imported
@@ -101,9 +103,15 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
   const [isDrawingLasso, setIsDrawingLasso] = useState(false);
   const [lassoPoints, setLassoPoints] = useState<[number, number][]>([]);
 
+  // --- Ruler State ---
+  const [isRulerActive, setIsRulerActive] = useState(false);
+  const [rulerPoints, setRulerPoints] = useState<[number, number][]>([]);
+  const [rulerDistanceMicrons, setRulerDistanceMicrons] = useState<number | null>(null);
+  const [rulerHoverCoord, setRulerHoverCoord] = useState<[number, number] | null>(null); // State for hover coordinate
+
   // --- Refs --- 
   const isDragging = useRef(false);
-  const deckContainerRef = useRef<HTMLDivElement>(null); // MOVED: Hook call moved before conditional returns
+  const deckContainerRef = useRef<HTMLDivElement>(null);
 
   // Process JOB RESULTS to find unique layers, assign colors, and get boundaries
   useEffect(() => {
@@ -258,6 +266,71 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
       }
   };
 
+  // --- Ruler Controls ---
+  const toggleRuler = useCallback(() => {
+    setIsRulerActive(prev => {
+        const nextIsActive = !prev;
+        // Clear points and distance when toggling ruler off
+        if (!nextIsActive) { 
+          setRulerPoints([]);
+          setRulerDistanceMicrons(null);
+        }
+        // Ensure lasso is off when ruler is activated
+        if (nextIsActive) {
+            setIsDrawingLasso(false); 
+            setLassoPoints([]); 
+            if (onLassoSelect) onLassoSelect(null); // Clear external lasso state too
+        }
+        return nextIsActive;
+    });
+  }, [onLassoSelect]);
+
+  const clearRuler = useCallback(() => {
+    setRulerPoints([]);
+    setRulerDistanceMicrons(null);
+    // Keep ruler active after clearing, user can click again or toggle off
+  }, []);
+
+  // --- DeckGL Click Handler for Ruler ---
+  const handleDeckClick = useCallback((info: PickingInfo, event: any) => {
+    if (isRulerActive && info.coordinate) { 
+      const clickedCoord: [number, number] = [info.coordinate[0], info.coordinate[1]];
+      setRulerHoverCoord(null); // Reset hover coord on click
+      setRulerPoints(prev => {
+        let nextPoints = [...prev];
+        if (nextPoints.length >= 2) {
+          nextPoints = [clickedCoord]; 
+          setRulerDistanceMicrons(null);
+        } else {
+          nextPoints.push(clickedCoord);
+        }
+        if (nextPoints.length === 2) {
+          const p1 = nextPoints[0];
+          const p2 = nextPoints[1];
+          const dx = p2[0] - p1[0];
+          const dy = p2[1] - p1[1];
+          const distanceUnits = Math.sqrt(dx * dx + dy * dy);
+          const distanceMicrons = distanceUnits / 2;
+          setRulerDistanceMicrons(distanceMicrons);
+          // Maybe deactivate ruler here? setIsRulerActive(false);
+        }
+        return nextPoints;
+      });
+      return; 
+    }
+  }, [isRulerActive]);
+
+  const handleHover = useCallback((info: PickingInfo, event: any) => {
+    if (isRulerActive && rulerPoints.length === 1 && info.coordinate) {
+      setRulerHoverCoord([info.coordinate[0], info.coordinate[1]]);
+    } else {
+        // Clear hover coord if ruler not active or 0/2 points selected
+        if (rulerHoverCoord !== null) { // Avoid unnecessary state updates
+             setRulerHoverCoord(null);
+        }
+    }
+  }, [isRulerActive, rulerPoints.length, rulerHoverCoord]); // Add rulerHoverCoord to dependencies
+
   // Define DeckGL layers based on BOUNDARIES and visibility state
   const layers = useMemo(() => {
       if (!rawLayerBoundaries || Object.keys(rawLayerBoundaries).length === 0) return [];
@@ -280,8 +353,8 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
                   getLineColor: [255, 255, 255, 150], // White outline
                   getLineWidth: 1,
                   lineWidthMinPixels: 1,
-                  pickable: !isDrawingLasso, // Disable picking layer polygons while drawing lasso
-                  autoHighlight: !isDrawingLasso, // Disable auto-highlight while drawing
+                  pickable: !isDrawingLasso && !isRulerActive, // Disable picking if ruler is active too
+                  autoHighlight: !isDrawingLasso && !isRulerActive, // Disable auto-highlight while drawing
                   highlightColor: [255, 255, 255, 100],
                   updateTriggers: { // Trigger update when selection changes
                     // REMOVED: selectedLayerNames triggers
@@ -323,9 +396,55 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
        } else {
            console.log('[Layers Memo] No Lasso Layer. Points:', lassoPoints.length);
        }
-       return finalLayers as (PolygonLayer<any> | GeoJsonLayer<any>)[];
 
-  }, [rawLayerBoundaries, visibleLayers, layerColors, lassoPoints, isDrawingLasso]); // isDragging.current is intentionally omitted as it's a ref
+       // --- Add Ruler Layers (Path and Points) ---
+       let rulerLayers: Layer[] = [];
+       let rulerPathData: [number, number][] | null = null;
+
+       if (rulerPoints.length === 1 && rulerHoverCoord) {
+           // Line follows cursor
+           rulerPathData = [rulerPoints[0], rulerHoverCoord];
+       } else if (rulerPoints.length === 2) {
+           // Fixed line after second click
+           rulerPathData = rulerPoints;
+       }
+
+       if (rulerPathData) {
+           rulerLayers.push(new PathLayer({
+               id: 'ruler-path',
+               data: [{ path: rulerPathData }],
+               getPath: d => d.path,
+               getColor: [0, 200, 200, 200], // Cyan with some transparency
+               getWidth: 2,
+               widthMinPixels: 2,
+               billboard: true, 
+               pickable: false,
+           }));
+       }
+       
+       // Layer for the points (only show clicked points, not hover coord)
+       if (rulerPoints.length > 0) {
+           rulerLayers.push(new ScatterplotLayer({
+               id: 'ruler-points',
+               data: rulerPoints.map(p => ({ coordinates: p })), 
+               getPosition: d => d.coordinates,
+               getFillColor: [0, 200, 200, 255], // Solid Cyan color for points
+               getRadius: 5, 
+               radiusScale: 1, 
+               radiusMinPixels: 3, 
+               radiusMaxPixels: 10, 
+               pickable: false,
+           }));
+       }
+
+       const finalLayersWithRuler = [
+           ...finalLayers,
+           ...rulerLayers
+       ].filter(Boolean); // Filter out null layers
+
+       return finalLayersWithRuler as Layer[];
+
+  }, [rawLayerBoundaries, visibleLayers, layerColors, lassoPoints, isDrawingLasso, rulerPoints, isRulerActive, rulerHoverCoord]); // Added rulerHoverCoord dependency
 
   const toggleFullscreen = () => {
     setIsFullscreen(!isFullscreen);
@@ -383,8 +502,6 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
   }
 
   // Main Render
-  // REMOVED: const deckContainerRef = useRef<HTMLDivElement>(null);
-
   return (
     <div ref={deckContainerRef} className={`${styles.spatialOverviewContainer} ${isFullscreen ? styles.fullscreen : ''}`}>
       <div className={styles.deckGlWrapper}> 
@@ -399,7 +516,13 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
           onDragStart={handleDragStart}
           onDrag={handleDrag}
           onDragEnd={handleDragEnd}
-          getCursor={({isDragging: deckIsDragging}) => isDrawingLasso ? 'crosshair' : (deckIsDragging ? 'grabbing' : 'grab')}
+          onClick={handleDeckClick} // Use updated handler
+          onHover={handleHover} // Add the hover handler
+          getCursor={({isDragging: deckIsDragging}) => 
+              isRulerActive ? 'crosshair' : 
+              (isDrawingLasso ? 'crosshair' : 
+              (deckIsDragging ? 'grabbing' : 'grab'))
+          }
           style={{ width: '100%', height: '100%', position: 'relative' }}
         />
         {/* Add ScaleBar here, ensure viewState and zoom are valid */}
@@ -410,8 +533,21 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
             targetPixelWidth={100} // Optional: aim for a 100px wide bar
           />
         )}
+
+        {/* Ruler Distance Display - Improved Styling */} 
+        {rulerDistanceMicrons !== null && (
+            <div className={styles.measurementDisplay}> {/* Use a dedicated class */} 
+                <Icon sx={{ fontSize: 16, mr: 0.5, color: '#00c8c8' }}>straighten</Icon> {/* Optional Icon */} 
+                <span>{`Distance: ${rulerDistanceMicrons.toFixed(1)} µm`}</span>
+                <Tooltip title="Clear Measurement">
+                    <IconButton size="small" onClick={clearRuler} sx={{ ml: 0.5, p: '2px' }}>
+                        <Icon fontSize="inherit">close</Icon>
+                    </IconButton>
+                </Tooltip>
+            </div>
+        )}
       </div>
-      {/* Layer Visibility Controls */}
+      {/* Controls Overlay */} 
       <div className={styles.controlsOverlay}>
           <div className={styles.controlSection}>
               <h4>Layers</h4>
@@ -440,44 +576,56 @@ const SpatialOverviewVisualization: React.FC<SpatialOverviewVisualizationProps> 
                 )}
               </div>
           </div>
-          {/* Lasso Controls */}
-          <div className={`${styles.controlSection} ${styles.lassoControls}`}>
-                <h4>Selection Tool</h4>
-
-                {/* Show Start Lasso ONLY if NOT drawing AND no points exist */}
-                {!isDrawingLasso && lassoPoints.length === 0 && (
-                  <button
-                      onClick={toggleLasso}
-                      disabled={!jobStatus?.results}
-                  >
-                    Start Lasso
-                  </button>
-                )}
-
-                {/* Show Cancel Lasso ONLY if drawing */}
-                {isDrawingLasso && (
-                  <button
-                      onClick={toggleLasso} // toggleLasso handles cancelling
-                      className={styles.activeLasso}
-                  >
-                    Cancel Lasso
-                  </button>
-                )}
-
-                {/* Show Clear Selection if ANY points exist */}
-                {lassoPoints.length > 0 && (
-                    <button onClick={clearLasso}>
-                      Clear Selection
-                    </button>
-                )}
-
-                {/* Show Analyze Selection ONLY if NOT drawing AND a valid polygon exists */}
-                {!isDrawingLasso && lassoPoints.length >= 4 && (
-                    <button onClick={onAnalyzeSelection} title="Run analysis on the selected region">
-                        Analyze Selection
-                    </button>
-                )}
-           </div>
+          {/* Tools Section */} 
+          <div className={styles.toolsSection}> 
+                {/* Lasso Controls */} 
+                <div className={`${styles.controlSection} ${styles.toolGroup}`}> 
+                    <h4>Selection</h4>
+                    <div className={styles.toolButtons}> 
+                        <Tooltip title={isDrawingLasso ? "Cancel Lasso" : "Start Lasso"}>
+                            <span> {/* Span needed for tooltip on disabled button */} 
+                            <IconButton onClick={toggleLasso} disabled={isRulerActive} color={isDrawingLasso ? 'secondary' : 'default'}>
+                                <Icon>gesture</Icon> {/* Example lasso icon */} 
+                            </IconButton>
+                            </span>
+                        </Tooltip>
+                        <Tooltip title="Clear Selection">
+                             <span> {/* Span needed for tooltip on disabled button */} 
+                             <IconButton onClick={clearLasso} disabled={lassoPoints.length === 0 || isRulerActive} size="small">
+                                 <Icon fontSize="inherit">clear_all</Icon> {/* Example clear icon */} 
+                             </IconButton>
+                             </span>
+                        </Tooltip>
+                        <Tooltip title="Analyze Selection">
+                             <span> {/* Span needed for tooltip on disabled button */} 
+                             <IconButton onClick={onAnalyzeSelection} disabled={lassoPoints.length < 4 || isDrawingLasso || isRulerActive} size="small">
+                                 <Icon fontSize="inherit">analytics</Icon> {/* Example analyze icon */} 
+                             </IconButton>
+                             </span>
+                        </Tooltip>
+                    </div>
+                </div>
+                {/* Ruler Controls */} 
+                <div className={`${styles.controlSection} ${styles.toolGroup}`}> 
+                    <h4>Measure</h4>
+                    <div className={styles.toolButtons}> 
+                        <Tooltip title={isRulerActive ? "Deactivate Ruler" : "Activate Ruler"}>
+                             <span> {/* Span needed for tooltip on disabled button */} 
+                            <IconButton onClick={toggleRuler} disabled={isDrawingLasso} color={isRulerActive ? "primary" : "default"}>
+                                <Icon>straighten</Icon>
+                            </IconButton>
+                             </span>
+                        </Tooltip>
+                        <Tooltip title="Clear Measurement">
+                             <span> {/* Span needed for tooltip on disabled button */} 
+                             <IconButton onClick={clearRuler} disabled={rulerPoints.length === 0} size="small">
+                                 <Icon fontSize="inherit">close</Icon>
+                             </IconButton>
+                             </span>
+                        </Tooltip>
+                    </div>
+                </div>
+          </div>
       </div>
       {/* Fullscreen Toggle Button - Use standard button with unicode characters */}
       <button 

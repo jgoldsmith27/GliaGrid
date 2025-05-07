@@ -414,3 +414,38 @@
   overflow-y: auto; /* Show scrollbar only if needed in fullscreen */
 }
 /* --- End Override --- */ 
+
+/* Ruler Distance Display */
+.measurementDisplay {
+    position: absolute;
+    bottom: 60px; /* Position above scale bar */
+    left: 20px;
+    background-color: rgba(255, 255, 255, 0.8);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    color: #333;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.measurementDisplay span {
+    margin-right: 4px;
+}
+
+/* Container for Legend and Other Controls */
+.legendAndControlsContainer {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    /* Add any other desired styling */
+}
+
+/* Container specifically for density/points controls if needed */
+.otherControlsContainer {
+     display: flex;
+     flex-direction: column;
+     gap: 8px;
+} 
