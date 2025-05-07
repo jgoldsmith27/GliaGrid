@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom'; // Import useParams and useNavigate
 import styles from './ResultsPage.module.css';
 import LoadingSpinner from '../../components/LoadingSpinner/LoadingSpinner';
@@ -17,6 +17,8 @@ import SpatialOverviewVisualization from '../../components/SpatialOverviewVisual
 import { SharedDataStore, useSharedData, DataRequestOptions } from '../../services/data/SharedDataStore';
 import { InteractionVisualizationData } from '../../hooks/useInteractionData'; // Assuming type is exported
 import { Tab, Tabs, Box, Typography, CircularProgress, Alert } from '@mui/material';
+// ADD TextField for search inputs
+import TextField from '@mui/material/TextField';
 
 // Define the structure for combined data used in tables/visualizations
 export interface CombinedInteractionData extends Partial<PathwayDominanceResult>, Partial<ModuleContextResult> {
@@ -79,6 +81,10 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
   const [displayedVizData, setDisplayedVizData] = useState<InteractionVisualizationData | null>(null);
   const [isLoadingDisplayedViz, setIsLoadingDisplayedViz] = useState(false);
   const [displayedVizError, setDisplayedVizError] = useState<string | null>(null);
+
+  // ADDED: State for search terms
+  const [ligandSearchTerm, setLigandSearchTerm] = useState<string>('');
+  const [receptorSearchTerm, setReceptorSearchTerm] = useState<string>('');
 
   // ADDED: Get data store instance
   const dataStore = useSharedData();
@@ -191,6 +197,30 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
   // --- Effect to Stream Spatial Data for Overview ---
   // REMOVED - Streaming is initiated from DataInputPage and managed by SharedDataStore
   // useEffect(() => { ... }, [...]); 
+
+  // --- Filtering logic for search terms ---
+  const filteredAnalysisData = useMemo(() => {
+    if (!combinedAnalysisData) return [];
+
+    let filtered = combinedAnalysisData;
+
+    const ligandQuery = ligandSearchTerm.toLowerCase().trim();
+    const receptorQuery = receptorSearchTerm.toLowerCase().trim();
+
+    if (ligandQuery) {
+      filtered = filtered.filter(item =>
+        item.ligand?.toLowerCase().includes(ligandQuery)
+      );
+    }
+
+    if (receptorQuery) {
+      filtered = filtered.filter(item =>
+        item.receptor?.toLowerCase().includes(receptorQuery)
+      );
+    }
+
+    return filtered;
+  }, [combinedAnalysisData, ligandSearchTerm, receptorSearchTerm]);
 
   // Determine scopeForApi (needed for handleSelectPair)
   const scopeForApi = 
@@ -465,6 +495,30 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
             </div>
         )}
         
+        {/* ADDED: Search input fields */}
+        <div className={styles.controlGroup}>
+          <TextField
+            label="Search Ligand"
+            variant="outlined"
+            size="small"
+            fullWidth
+            value={ligandSearchTerm}
+            onChange={(e) => setLigandSearchTerm(e.target.value)}
+            className={styles.searchInput} // Added for potential styling
+          />
+        </div>
+        <div className={styles.controlGroup}>
+          <TextField
+            label="Search Receptor"
+            variant="outlined"
+            size="small"
+            fullWidth
+            value={receptorSearchTerm}
+            onChange={(e) => setReceptorSearchTerm(e.target.value)}
+            className={styles.searchInput} // Added for potential styling
+          />
+        </div>
+        
          {/* Add other filters/settings here later */}
       </div>
 
@@ -495,7 +549,7 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
                            // to handle receiving custom results this way.
                            <SummaryTabContent 
                                 jobId={jobId || ''} 
-                                combinedData={[]} // Pass empty for original data
+                                combinedData={filteredAnalysisData} // MODIFIED: Pass filtered data
                                 onSelectPair={handleSelectPair}
                                 apiScopeName={null} // No API scope for custom results display
                                 currentScope={selectedScope} 
@@ -525,7 +579,7 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
               <div className={styles.summaryInteractionArea}> 
                   <SummaryTabContent 
                         jobId={jobId || ''} 
-                        combinedData={combinedAnalysisData}
+                        combinedData={filteredAnalysisData}
                         onSelectPair={handleSelectPair}
                         apiScopeName={scopeForApi}
                         currentScope={selectedScope} 
