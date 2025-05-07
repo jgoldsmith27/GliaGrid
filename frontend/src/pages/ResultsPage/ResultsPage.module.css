@@ -154,4 +154,38 @@ progress::-moz-progress-bar {
 .backButton:hover {
     background-color: #e2e8f0; /* Cool Gray 200 */
     border-color: #94a3b8; /* Cool Gray 400 */
-} 
+}
+
+/* Styles for control groups, including search bars */
+.controlGroup {
+    margin-bottom: 8px; /* Reduced bottom margin */
+}
+
+.controlGroup:first-of-type {
+    margin-top: 16px; /* Keep some top margin for the first group if it contains search inputs */
+}
+
+/* Styles for the search input fields - Now handled by sx prop in component */
+/*
+.searchInput {
+    // Target the inner input of MUI TextField for padding
+}
+
+.searchInput .MuiOutlinedInput-root {
+    height: 36px !important; 
+    font-size: 0.875rem !important; 
+}
+
+.searchInput .MuiInputBase-input {
+    padding-top: 6px !important; 
+    padding-bottom: 6px !important;
+}
+
+.searchInput .MuiInputLabel-root {
+    font-size: 0.875rem !important; 
+}
+
+.searchInput .MuiInputLabel-outlined.MuiInputLabel-shrink {
+    transform: translate(14px, -5px) scale(0.75) !important; 
+}
+*/ 

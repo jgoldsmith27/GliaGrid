@@ -1,4 +1,6 @@
 import React from 'react';
+import ToggleButton from '@mui/material/ToggleButton';
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import styles from './ScopeSelector.module.css';
 
 // Export the type
@@ -13,44 +15,35 @@ const ScopeSelector: React.FC<ScopeSelectorProps> = ({
   selectedScope,
   onScopeChange,
 }) => {
+  const handleChange = (
+    event: React.MouseEvent<HTMLElement>,
+    newScope: ScopeType | null, // ToggleButtonGroup can return null if all toggles are deselected
+  ) => {
+    if (newScope !== null) {
+      onScopeChange(newScope);
+    }
+  };
+
   return (
-    <div className={styles.scopeSelector}>
-      <h3 className={styles.title}>Scope</h3>
-      <div className={styles.options}>
-        <label className={styles.optionLabel}>
-          <input
-            type="radio"
-            name="scope"
-            value="whole_tissue"
-            checked={selectedScope === 'whole_tissue'}
-            onChange={() => onScopeChange('whole_tissue')}
-            className={styles.radioInput}
-          />
+    <div className={styles.scopeSelectorContainer}> {/* Renamed for clarity if needed */}
+      <h3 className={styles.title}>SCOPE</h3> {/* Kept title, can be removed if ToggleButtonGroup is self-explanatory */}
+      <ToggleButtonGroup
+        value={selectedScope}
+        exclusive // Ensures only one button can be active at a time
+        onChange={handleChange}
+        aria-label="Analysis Scope"
+        className={styles.toggleButtonGroup} // Added class for styling
+      >
+        <ToggleButton value="whole_tissue" aria-label="Whole Tissue" className={styles.toggleButton}>
           Whole Tissue
-        </label>
-        <label className={styles.optionLabel}>
-          <input
-            type="radio"
-            name="scope"
-            value="layers"
-            checked={selectedScope === 'layers'}
-            onChange={() => onScopeChange('layers')}
-            className={styles.radioInput}
-          />
+        </ToggleButton>
+        <ToggleButton value="layers" aria-label="Layers" className={styles.toggleButton}>
           Layers
-        </label>
-        <label className={styles.optionLabel}>
-          <input
-            type="radio"
-            name="scope"
-            value="custom"
-            checked={selectedScope === 'custom'}
-            onChange={() => onScopeChange('custom')}
-            className={styles.radioInput}
-          />
+        </ToggleButton>
+        <ToggleButton value="custom" aria-label="Custom Selection" className={styles.toggleButton}>
           Custom Selection
-        </label>
-      </div>
+        </ToggleButton>
+      </ToggleButtonGroup>
     </div>
   );
 };

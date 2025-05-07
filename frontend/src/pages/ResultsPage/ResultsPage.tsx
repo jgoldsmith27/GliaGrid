@@ -461,30 +461,65 @@ const ResultsPage: React.FC = () => { // Define as standard functional component
   console.log("[ResultsPage] Passing onAnalyzeSelection:", typeof handleAnalyzeLasso); // LOGGING
 
   const searchBarInputs = (
-    <>
-      <div className={styles.controlGroup} style={{ marginTop: '1rem', marginBottom: '0.5rem' }}>
+    <div style={{ display: 'flex', gap: '16px', alignItems: 'baseline' }}> {/* Changed to baseline alignment */}
+      <div className={styles.controlGroup} style={{ marginBottom: '0px' }}> {/* Adjust margin if needed */}
         <TextField
           label="Search Ligand"
           variant="outlined"
-          size="small"
-          fullWidth
           value={ligandSearchTerm}
           onChange={(e) => setLigandSearchTerm(e.target.value)}
-          className={styles.searchInput}
+          sx={{
+            width: '240px', // Adjusted width
+            '.MuiOutlinedInput-root': { 
+                height: '36px', 
+                display: 'flex', 
+                alignItems: 'center',
+                // Removed overflow: 'hidden' to allow natural input scroll if text is too long
+            },
+            '.MuiInputBase-input': { 
+              padding: '6px 10px', 
+              fontSize: '0.875rem',
+              // Ensure default overflow behavior for text (usually scroll)
+            },
+            '.MuiInputLabel-root': {
+              fontSize: '0.875rem',
+              lineHeight: '1', 
+            },
+            '.MuiInputLabel-outlined.MuiInputLabel-shrink': {
+              transform: 'translate(14px, -5px) scale(0.75)', 
+            },
+          }}
         />
       </div>
-      <div className={styles.controlGroup} style={{ marginBottom: '1rem' }}>
+      <div className={styles.controlGroup} style={{ marginBottom: '0px'}}> {/* Adjust margin if needed */}
         <TextField
           label="Search Receptor"
           variant="outlined"
-          size="small"
-          fullWidth
           value={receptorSearchTerm}
           onChange={(e) => setReceptorSearchTerm(e.target.value)}
-          className={styles.searchInput}
+          sx={{
+            width: '240px', // Adjusted width
+            '.MuiOutlinedInput-root': { 
+                height: '36px',
+                display: 'flex',
+                alignItems: 'center',
+                // Removed overflow: 'hidden'
+            },
+            '.MuiInputBase-input': { 
+              padding: '6px 10px',
+              fontSize: '0.875rem',
+            },
+            '.MuiInputLabel-root': {
+              fontSize: '0.875rem',
+              lineHeight: '1',
+            },
+            '.MuiInputLabel-outlined.MuiInputLabel-shrink': {
+              transform: 'translate(14px, -5px) scale(0.75)',
+            },
+          }}
         />
       </div>
-    </>
+    </div>
   );
 
   return (

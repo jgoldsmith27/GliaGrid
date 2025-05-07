@@ -6,13 +6,17 @@
     background-color: transparent;
 }
 
+.scopeSelectorContainer {
+    /* Add any container-specific styles if needed, e.g., margin */
+    margin-bottom: 16px; /* Example margin */
+}
+
 .title {
     margin-top: 0;
-    margin-bottom: 12px;
-    font-size: 0.9em;
+    margin-bottom: 8px;
+    font-size: 0.875rem; /* 14px */
     font-weight: 600;
-    /* color: #475569; */ /* Cool Gray 600 */
-    color: #1e293b; /* Cool Gray 800 */
+    color: #4b5563; /* Cool Gray 600 */
     text-transform: uppercase;
     letter-spacing: 0.05em;
 }
@@ -50,4 +54,52 @@
     color: #1e293b; /* Cool Gray 800 */
     font-size: 0.95em;
     font-weight: 500;
+}
+
+.toggleButtonGroup {
+    /* Styles for the group container */
+    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); /* Subtle shadow */
+    border-radius: 8px !important; /* Ensure rounded corners for the group */
+}
+
+.toggleButton {
+    text-transform: none !important; /* Keep original casing */
+    font-weight: 500 !important;
+    font-size: 0.875rem !important; /* 14px */
+    padding: 6px 16px !important; /* Adjust padding for a balanced look */
+    color: #374151 !important; /* Cool Gray 700 for text */
+    border-color: #d1d5db !important; /* Cool Gray 300 for borders */
+    line-height: 1.5 !important;
+}
+
+/* Styling for the selected button */
+.toggleButton.Mui-selected {
+    background-color: #3b82f6 !important; /* Tailwind Blue 500 */
+    color: white !important;
+    border-color: #3b82f6 !important;
+}
+
+/* Hover effect for non-selected buttons */
+.toggleButton:not(.Mui-selected):hover {
+    background-color: #f3f4f6 !important; /* Cool Gray 100 */
+    border-color: #9ca3af !important; /* Cool Gray 400 */
+}
+
+/* Remove extra borders between buttons in the group for a seamless look */
+.toggleButton:not(:first-of-type) {
+    border-left-color: transparent !important; 
+}
+
+.toggleButton.Mui-selected + .toggleButton:not(.Mui-selected) {
+    border-left-color: #d1d5db !important; /* Restore left border if next to selected */
+}
+
+.toggleButton:first-of-type {
+    border-top-left-radius: 8px !important;
+    border-bottom-left-radius: 8px !important;
+}
+
+.toggleButton:last-of-type {
+    border-top-right-radius: 8px !important;
+    border-bottom-right-radius: 8px !important;
 } 
