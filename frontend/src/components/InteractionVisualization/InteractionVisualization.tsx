@@ -551,7 +551,7 @@ const InteractionVisualization: React.FC<InteractionVisualizationProps> = React.
     ].filter(Boolean); 
 
     return finalLayers as Layer[];
-  }, [data, isLoading, visibleLayers, layerColors, pointsDisplayType, densityScoringType, isRulerActive, receptorPointsToPlot, layerBoundaries]);
+  }, [data, isLoading, visibleLayers, layerColors, pointsDisplayType, densityScoringType, isRulerActive, receptorPointsToPlot, layerBoundaries, rulerHoverCoord, rulerPoints]);
 
   const toggleFullscreen = () => {
     setIsFullscreen(!isFullscreen);

@@ -119,10 +119,20 @@ const ComparisonToolPage: React.FC = () => {
   const {
     jobStatus: comparisonJobDetails,
     isLoading: isLoadingComparisonJobStatus, 
-    error: comparisonJobErrorFromHook, // Renamed to avoid conflict with submission error
+    error: comparisonJobErrorFromHook,
   } = useJobStatus(comparisonJobId);
   
-  // Combine submission error and hook error if needed, or decide which one to prioritize
+  const {
+    jobStatus: selection1SourceJobDetails,
+  } = useJobStatus(selection1?.source_job_id || null);
+
+  const {
+    jobStatus: selection2SourceJobDetails,
+  } = useJobStatus(selection2?.source_job_id || null);
+
+  const selection1LayerBoundaries = useMemo(() => selection1SourceJobDetails?.results?.outputs?.layer_boundaries || undefined, [selection1SourceJobDetails]);
+  const selection2LayerBoundaries = useMemo(() => selection2SourceJobDetails?.results?.outputs?.layer_boundaries || undefined, [selection2SourceJobDetails]);
+
   const displayableComparisonJobError = comparisonJobErrorFromHook || comparisonError;
 
   const selectedPairMemo = React.useMemo(() => {
@@ -207,10 +217,10 @@ const ComparisonToolPage: React.FC = () => {
         currentScope={selection1DisplayScope}
         isLoading={isLoadingSelection1Viz}
         cancelFetch={cancelSelection1VizFetch}
-        layerBoundaries={undefined}
+        layerBoundaries={selection1LayerBoundaries}
       />
     );
-  }, [selection1VizDataMemo, selectedMolecule, selection1DisplayScope, isLoadingSelection1Viz, cancelSelection1VizFetch]);
+  }, [selection1VizDataMemo, selectedMolecule, selection1DisplayScope, isLoadingSelection1Viz, cancelSelection1VizFetch, selection1LayerBoundaries]);
 
   const renderSelection2Visualization = React.useMemo(() => {
     if (!selectedMolecule || !selection2VizDataMemo) return null;
@@ -221,10 +231,10 @@ const ComparisonToolPage: React.FC = () => {
         currentScope={selection2DisplayScope}
         isLoading={isLoadingSelection2Viz}
         cancelFetch={cancelSelection2VizFetch}
-        layerBoundaries={undefined}
+        layerBoundaries={selection2LayerBoundaries}
       />
     );
-  }, [selection2VizDataMemo, selectedMolecule, selection2DisplayScope, isLoadingSelection2Viz, cancelSelection2VizFetch]);
+  }, [selection2VizDataMemo, selectedMolecule, selection2DisplayScope, isLoadingSelection2Viz, cancelSelection2VizFetch, selection2LayerBoundaries]);
 
   const renderSelection1Loading = React.useMemo(() => {
     if (!isLoadingSelection1Viz) return null;
