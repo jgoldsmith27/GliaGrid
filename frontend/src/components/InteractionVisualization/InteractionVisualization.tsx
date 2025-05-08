@@ -37,7 +37,7 @@ interface InteractionVisualizationProps {
   data: VisualizationData | null; // Updated data prop type, allow null initially
   ligandName: string; // Keep ligandName for context
   // receptorName is now derived from data prop
-  currentScope: 'whole_tissue' | 'layers';
+  currentScope: string; // Changed from 'whole_tissue' | 'layers' to string
   isLoading: boolean;
   cancelFetch: () => void;
   layerBoundaries?: Record<string, [number, number][] | null>;

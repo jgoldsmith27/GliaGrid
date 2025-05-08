@@ -133,9 +133,35 @@ const ComparisonToolPage: React.FC = () => {
     ] as [string, string];
   }, [selectedMolecule]);
   
-  const selection1Scope = React.useMemo(() => selection1?.type === 'layer' ? 'layers' : 'whole_tissue', [selection1]);
+  const selection1DisplayScope = useMemo(() => {
+    if (selection1?.type === 'layer') { 
+      return selection1.definition?.layer_name || 'whole_tissue';
+    }
+    return 'whole_tissue';
+  }, [selection1]);
+
+  const selection2DisplayScope = useMemo(() => {
+    if (selection2?.type === 'layer') { 
+      return selection2.definition?.layer_name || 'whole_tissue';
+    }
+    return 'whole_tissue';
+  }, [selection2]);
+
+  const selection1ApiScope = useMemo(() => {
+    if (selection1?.type === 'layer') {
+      return selection1.definition?.layer_name || null;
+    }
+    return 'whole_tissue';
+  }, [selection1]);
+
+  const selection2ApiScope = useMemo(() => {
+    if (selection2?.type === 'layer') {
+      return selection2.definition?.layer_name || null;
+    }
+    return 'whole_tissue';
+  }, [selection2]);
+
   const selection1Polygon = React.useMemo(() => selection1?.type === 'lasso' ? selection1.definition.polygon_coords || null : null, [selection1]);
-  const selection2Scope = React.useMemo(() => selection2?.type === 'layer' ? 'layers' : 'whole_tissue', [selection2]);
   const selection2Polygon = React.useMemo(() => selection2?.type === 'lasso' ? selection2.definition.polygon_coords || null : null, [selection2]);
   
   const { 
@@ -143,14 +169,14 @@ const ComparisonToolPage: React.FC = () => {
     isLoading: isLoadingSelection1Viz, 
     error: selection1VizError,
     cancelFetch: cancelSelection1VizFetch
-  } = useInteractionData(selection1?.source_job_id || null, selectedPairMemo, selection1Scope, selection1Polygon);
+  } = useInteractionData(selection1?.source_job_id || null, selectedPairMemo, selection1ApiScope, selection1Polygon);
   
   const { 
     interactionVizData: selection2VizData, 
     isLoading: isLoadingSelection2Viz, 
     error: selection2VizError,
     cancelFetch: cancelSelection2VizFetch
-  } = useInteractionData(selection2?.source_job_id || null, selectedPairMemo, selection2Scope, selection2Polygon);
+  } = useInteractionData(selection2?.source_job_id || null, selectedPairMemo, selection2ApiScope, selection2Polygon);
   
   const selection1VizDataMemo = React.useMemo(() => {
     if (!selection1VizData || !selectedMolecule) return null;
@@ -178,13 +204,13 @@ const ComparisonToolPage: React.FC = () => {
       <InteractionVisualization
         data={selection1VizDataMemo}
         ligandName={selectedMolecule.type === 'ligand_receptor_pair' ? selectedMolecule.ligandId || '' : selectedMolecule.id}
-        currentScope={selection1Scope}
+        currentScope={selection1DisplayScope}
         isLoading={isLoadingSelection1Viz}
         cancelFetch={cancelSelection1VizFetch}
         layerBoundaries={undefined}
       />
     );
-  }, [selection1VizDataMemo, selectedMolecule, selection1Scope, isLoadingSelection1Viz, cancelSelection1VizFetch]);
+  }, [selection1VizDataMemo, selectedMolecule, selection1DisplayScope, isLoadingSelection1Viz, cancelSelection1VizFetch]);
 
   const renderSelection2Visualization = React.useMemo(() => {
     if (!selectedMolecule || !selection2VizDataMemo) return null;
@@ -192,13 +218,13 @@ const ComparisonToolPage: React.FC = () => {
       <InteractionVisualization
         data={selection2VizDataMemo}
         ligandName={selectedMolecule.type === 'ligand_receptor_pair' ? selectedMolecule.ligandId || '' : selectedMolecule.id}
-        currentScope={selection2Scope}
+        currentScope={selection2DisplayScope}
         isLoading={isLoadingSelection2Viz}
         cancelFetch={cancelSelection2VizFetch}
         layerBoundaries={undefined}
       />
     );
-  }, [selection2VizDataMemo, selectedMolecule, selection2Scope, isLoadingSelection2Viz, cancelSelection2VizFetch]);
+  }, [selection2VizDataMemo, selectedMolecule, selection2DisplayScope, isLoadingSelection2Viz, cancelSelection2VizFetch]);
 
   const renderSelection1Loading = React.useMemo(() => {
     if (!isLoadingSelection1Viz) return null;
