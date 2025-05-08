@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import styles from './ComparisonToolPage.module.css';
-import { Box, Typography, Paper, Button, CircularProgress, TextField, Alert } from '@mui/material';
+import { Box, Typography, Paper, Button, CircularProgress, TextField, Alert, Tooltip, IconButton } from '@mui/material';
 import InfoIcon from '@mui/icons-material/Info';
 
 // Import hooks and components needed for Selection 2 (same project)
@@ -468,12 +468,39 @@ const ComparisonToolPage: React.FC = () => {
           {selection1 && selection2 && (
             <Box sx={{ mt: 4, pt: 2, borderTop: '1px solid #ccc' }} className={styles.analysisConfigSection}>
               <Typography variant="h6" gutterBottom>Comparison Parameters</Typography>
-              <TextField 
-                label="Significance Threshold (FDR)" type="number" value={fdrThreshold}
-                onChange={(e) => { const val = parseFloat(e.target.value); if (!isNaN(val) && val >= 0 && val <= 1) setFdrThreshold(val); }}
-                inputProps={{ step: 0.01, min: 0, max: 1 }} sx={{ maxWidth: 300, mb: 3 }} variant="outlined" size="small"
-                helperText="False Discovery Rate threshold (e.g., 0.05)."
-              />
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+                <TextField 
+                  label="Significance Threshold (FDR)" type="number" value={fdrThreshold}
+                  onChange={(e) => { const val = parseFloat(e.target.value); if (!isNaN(val) && val >= 0 && val <= 1) setFdrThreshold(val); }}
+                  inputProps={{ step: 0.01, min: 0, max: 1 }} sx={{ maxWidth: 280 }} variant="outlined" size="small"
+                  helperText="Controls the proportion of false positives. Lower is stricter."
+                />
+                <Tooltip 
+                  title={
+                    <React.Fragment>
+                      <Typography color="inherit" variant="subtitle2" sx={{ fontWeight: 'bold' }}>False Discovery Rate (FDR)</Typography>
+                      <Typography variant="body2" sx={{mb:1}}>
+                        The FDR controls the expected proportion of incorrectly identified significant items (false positives) among all items declared significant.
+                      </Typography>
+                      <Typography variant="body2">
+                        <strong>Lower FDR (e.g., 0.01):</strong> More stringent. Fewer results, higher confidence, fewer false positives, but might miss some true effects.
+                      </Typography>
+                      <Typography variant="body2">
+                        <strong>Higher FDR (e.g., 0.10):</strong> Less stringent. More results, more potential true effects, but also more false positives.
+                      </Typography>
+                      <Typography variant="caption" sx={{mt:1, display: 'block'}}>
+                        Commonly 0.05 (5%). Adjust based on your analysis goals.
+                      </Typography>
+                    </React.Fragment>
+                  }
+                  arrow
+                  placement="right"
+                >
+                  <IconButton size="small" sx={{ ml: 0.5 }}>
+                    <InfoIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </Box>
               <Button variant="contained" color="primary" size="large" className={styles.actionButton} onClick={handleRunComparison} 
                 disabled={isStartingComparison || isLoadingComparisonJobStatus || (comparisonJobDetails?.status === 'running' || comparisonJobDetails?.status === 'pending')}>
                 {(isStartingComparison || isLoadingComparisonJobStatus || comparisonJobDetails?.status === 'running' || comparisonJobDetails?.status === 'pending') 
